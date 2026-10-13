@@ -1,7 +1,7 @@
 """NYSE sessions, holidays, early closes, and user-maintained event blackouts.
 
-Holiday and early-close tables are hard-coded for 2026-2027 and MUST be re-verified
-against the official NYSE calendar each year. Event dates live in config/events.yaml
+Holidays and early closes are generated from NYSE rules for 2015-2030 (plus two one-off closures)
+and MUST be re-verified against the official NYSE calendar each year. Event dates live in config/events.yaml
 and are user-maintained; nothing here is fetched live.
 """
 from __future__ import annotations
@@ -13,15 +13,62 @@ import pandas as pd
 from .config import ROOT, TZ
 
 D = dt.date
-HOLIDAYS = {
-    # 2026
-    D(2026, 1, 1), D(2026, 1, 19), D(2026, 2, 16), D(2026, 4, 3), D(2026, 5, 25),
-    D(2026, 6, 19), D(2026, 7, 3), D(2026, 9, 7), D(2026, 11, 26), D(2026, 12, 25),
-    # 2027
-    D(2027, 1, 1), D(2027, 1, 18), D(2027, 2, 15), D(2027, 3, 26), D(2027, 5, 31),
-    D(2027, 6, 18), D(2027, 7, 5), D(2027, 9, 6), D(2027, 11, 25), D(2027, 12, 24),
-}
-EARLY_CLOSE = {D(2026, 11, 27), D(2026, 12, 24), D(2027, 11, 26)}  # 13:00 ET
+
+
+def _nth_weekday(y: int, m: int, wd: int, n: int) -> dt.date:
+    d = D(y, m, 1)
+    d += dt.timedelta(days=(wd - d.weekday()) % 7)
+    return d + dt.timedelta(weeks=n - 1)
+
+
+def _last_weekday(y: int, m: int, wd: int) -> dt.date:
+    d = D(y + (m == 12), m % 12 + 1, 1) - dt.timedelta(days=1)
+    return d - dt.timedelta(days=(d.weekday() - wd) % 7)
+
+
+def _easter(y: int) -> dt.date:  # anonymous Gregorian algorithm
+    a, b, c = y % 19, y // 100, y % 100
+    d, e = b // 4, b % 4
+    g = (b - (b + 8) // 25 + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    mo, da = divmod(h + l - 7 * m + 114, 31)
+    return D(y, mo, da + 1)
+
+
+def _observed(d: dt.date, sat_to_friday: bool = True) -> dt.date | None:
+    if d.weekday() == 5:
+        return d - dt.timedelta(days=1) if sat_to_friday else None
+    if d.weekday() == 6:
+        return d + dt.timedelta(days=1)
+    return d
+
+
+def _build(y0: int = 2015, y1: int = 2030):
+    hol, early = set(), set()
+    for y in range(y0, y1 + 1):
+        fixed = [_observed(D(y, 1, 1), sat_to_friday=False), _observed(D(y, 7, 4)), _observed(D(y, 12, 25))]
+        if y >= 2022:
+            fixed.append(_observed(D(y, 6, 19)))
+        fixed += [_nth_weekday(y, 1, 0, 3), _nth_weekday(y, 2, 0, 3), _easter(y) - dt.timedelta(days=2),
+                  _last_weekday(y, 5, 0), _nth_weekday(y, 9, 0, 1), _nth_weekday(y, 11, 3, 4)]
+        hol.update(h for h in fixed if h)
+        tg = _nth_weekday(y, 11, 3, 4)
+        early.add(tg + dt.timedelta(days=1))                       # day after Thanksgiving
+        j3 = D(y, 7, 3)
+        if j3.weekday() <= 3:                                        # Mon-Thu before July 4
+            early.add(j3)
+        d24 = D(y, 12, 24)
+        if d24.weekday() < 5:
+            early.add(d24)
+    hol.update({D(2018, 12, 5), D(2025, 1, 9)})                      # national days of mourning
+    early -= hol
+    return hol, early
+
+
+HOLIDAYS, EARLY_CLOSE = _build()   # EARLY_CLOSE = 13:00 ET. Rule-based: re-verify against the NYSE calendar each year.
 
 
 def _ts(d: dt.date, hhmm: str) -> pd.Timestamp:
