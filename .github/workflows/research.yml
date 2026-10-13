@@ -1,0 +1,39 @@
+name: Daily ingest and backtest
+on:
+  schedule:
+    - cron: "40 21 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days of 5-minute history to request"
+        default: "60"
+concurrency:
+  group: spxai-state
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-core.txt
+      - run: pip install -r requirements-core.txt
+      - run: bash scripts/prepare_state.sh
+      - name: Ingest
+        env:
+          ALPACA_KEY_ID: ${{ secrets.ALPACA_KEY_ID }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m spxai.runner ingest --days ${{ inputs.days || '60' }}
+      - name: Backtest
+        run: python -m spxai.runner backtest
+      - name: Publish state
+        if: always()
+        run: bash scripts/publish_state.sh
