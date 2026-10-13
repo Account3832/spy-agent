@@ -1,0 +1,10 @@
+# User-maintained market-event blackout list. NOTHING HERE IS FETCHED LIVE.
+# The FOMC decision days below were seeded from memory of the Fed's published 2026
+# schedule and are marked verified: false. Confirm at federalreserve.gov, add CPI,
+# jobs report and other releases yourself, then set verified: true.
+#
+# blackout: whole_day  -> no new entries all day
+# blackout: window     -> uses time (ET) with minutes_before / minutes_after
+events:
+  - {date: "2026-10-28", name: "FOMC decision", severity: high, blackout: whole_day, verified: false}
+  - {date: "2026-12-09", name: "FOMC decision", severity: high, blackout: whole_day, verified: false}

@@ -1,0 +1,10 @@
+# Overrides for spxai.config.Settings. Every key is optional.
+# Environment variables SPXAI_<KEY> override this file (e.g. SPXAI_ACCOUNT_EQUITY=10000).
+account_equity: 25000
+max_risk_pct: 0.5
+max_daily_loss_pct: 2.0
+max_trades_per_day: 3
+max_concurrent: 1
+min_reward_risk: 1.5
+slippage_usd: 0.02         # dollars per SPY share per side, underlying research assumption
+paper_allow_unvalidated: true
