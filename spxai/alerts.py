@@ -33,13 +33,49 @@ class AlertType(str, Enum):
 TELEGRAM_SKIP = {"SETUP_FORMING", "SETUP_INVALIDATED"}
 
 
+def _clean(v: str | None) -> str:
+    """Removes spaces, line breaks and wrapping quotes that sneak in when a secret is pasted."""
+    return (v or "").strip().strip("\"'").strip().replace("\n", "").replace("\r", "").replace(" ", "")
+
+
+def _token() -> str:
+    return _clean(os.environ.get("TELEGRAM_BOT_TOKEN"))
+
+
+def _chat() -> str:
+    return _clean(os.environ.get("TELEGRAM_CHAT_ID"))
+
+
+def token_shape() -> str:
+    """Describes the saved token WITHOUT revealing it, to help fix a bad paste."""
+    raw = os.environ.get("TELEGRAM_BOT_TOKEN") or ""
+    if not raw:
+        return "token secret is empty or missing"
+    t = _clean(raw)
+    head, _, tail = t.partition(":")
+    notes = [f"length {len(t)} (a real token is about 45 to 50)", "has a colon: " + ("yes" if ":" in t else "NO"),
+             f"digits before the colon: {len(head)} ({'ok' if head.isdigit() and 8 <= len(head) <= 12 else 'looks wrong, expected 8 to 12 digits'})",
+             f"characters after the colon: {len(tail)}"]
+    if raw != raw.strip() or any(c in raw for c in " \n\r"):
+        notes.append("the pasted secret had spaces or line breaks (now ignored)")
+    if raw.strip()[:1] in ("\"", "'") or raw.strip()[-1:] in ("\"", "'"):
+        notes.append("the pasted secret had quote marks around it (now ignored)")
+    if t.lower().startswith("bot"):
+        notes.append("it starts with the word 'bot', which is not part of the token")
+    if "/" in t or "http" in t.lower():
+        notes.append("it looks like a web link, not a token")
+    if not head.isdigit() and head:
+        notes.append("the part before the colon should be only digits")
+    return "; ".join(notes)
+
+
 def telegram_enabled() -> bool:
-    return bool(os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"))
+    return bool(_token() and _chat())
 
 
 def send_telegram(text: str) -> str:
     """Sends one message. Returns 'delivered', 'not_configured', or a short error label. Never raises, never logs the token."""
-    tok, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+    tok, chat = _token(), _chat()
     if not (tok and chat):
         return "not_configured"
     try:
@@ -52,7 +88,7 @@ def send_telegram(text: str) -> str:
 
 def find_chat_ids() -> tuple[list[int], str]:
     """Asks Telegram which chats have messaged the bot. Returns (ids, status). Never prints or returns the token."""
-    tok = os.environ.get("TELEGRAM_BOT_TOKEN")
+    tok = _token()
     if not tok:
         return [], "no_token"
     try:

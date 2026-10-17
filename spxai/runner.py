@@ -246,7 +246,7 @@ def main(argv=None) -> int:
         elif a.cmd == "evaluate":
             print(json.dumps(evaluate(s, force=a.force), indent=2, default=str))
         elif a.cmd == "telegram-test":
-            from .alerts import find_chat_ids, send_telegram, telegram_enabled
+            from .alerts import find_chat_ids, send_telegram, telegram_enabled, token_shape
             if os.environ.get("TELEGRAM_BOT_TOKEN") and not os.environ.get("TELEGRAM_CHAT_ID"):
                 ids, st = find_chat_ids()
                 if ids:
@@ -256,6 +256,8 @@ def main(argv=None) -> int:
                 msg = {"bad_token": "Telegram says the token is wrong. Check the TELEGRAM_BOT_TOKEN secret: the whole token, with the colon, no spaces.",
                        "no_messages": "The token works, but your bot has no messages yet. Open your bot in Telegram, send it the word hello, then run this test again."}
                 print("CHAT ID NOT FOUND (" + st + "). " + msg.get(st, "Try again in a minute."))
+                if st == "bad_token":
+                    print("TOKEN CHECK (the token itself is never shown): " + token_shape())
                 return 1
             if not telegram_enabled():
                 print("TELEGRAM NOT CONFIGURED: add the secrets TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to the repo.")
