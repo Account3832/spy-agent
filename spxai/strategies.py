@@ -1,4 +1,4 @@
-"""Five explicit, versioned trading hypotheses. These are RESEARCH CANDIDATES, not assumed winners.
+"""Explicit, versioned trading hypotheses (five live candidates, four research candidates, one high-win-rate demonstration). These are RESEARCH CANDIDATES, not assumed winners.
 
 Each strategy turns completed-bar features into signals at the bar CLOSE. The backtester
 enters at the NEXT bar's open. Filters can be toggled for ablation tests.
@@ -237,7 +237,99 @@ class BaselineHourlyTrend(Strategy):
         return at & (d.h_dir == 1), at & (d.h_dir == -1), "baseline: 1h trend direction at 10:30"
 
 
-REGISTRY = {c.spec.name: c for c in (TrendPullback, OrbRetest, FailedBreakout, RangeReversion, VolExpansion)}
+def _first_per_day(sig: pd.Series, d: pd.DataFrame) -> pd.Series:
+    return sig & (sig.groupby(d.date).cumsum() == 1)
+
+
+class OrbBreakout(Strategy):
+    spec = StrategySpec(
+        "orb_breakout", "1.0",
+        "A decisive close beyond the first-30-minute range, in the direction of the 1-hour trend, tends to extend "
+        "(the published 'opening range breakout' idea; effects can fade, so it must pass the same fair test).",
+        "Opening range (09:30-10:00) is complete.",
+        "First 5-minute close beyond the opening range high (low) of the day.",
+        "1h trend agrees; price on the correct side of VWAP.",
+        "Close back inside the opening range.", "1.5 x ATR(14).", "T1 = 1.5R (half), T2 = 3R (half).",
+        "Flat at the mandatory exit.", "Same as trend_pullback.", "Max 1 signal per direction per day.", "30 minutes to 4 hours")
+    default_filters = ("htf", "vwap")
+
+    def raw(self, d):
+        up = (d.close > d.or_high) & (d.close.shift() <= d.or_high)
+        dn = (d.close < d.or_low) & (d.close.shift() >= d.or_low)
+        return _first_per_day(up, d), _first_per_day(dn, d), "first close beyond the opening range"
+
+
+class VwapReclaim(Strategy):
+    spec = StrategySpec(
+        "vwap_reclaim", "1.0",
+        "In a 1-hour trend, a dip through VWAP that is reclaimed on the next close tends to resume the trend.",
+        "1h trend direction is clear.",
+        "Previous bar closed on the wrong side of VWAP; this bar closes back through it in its own direction with fast EMA beyond slow EMA.",
+        "1h trend agrees.", "Close back through VWAP against the trade.", "1.5 x ATR(14).", "T1 = 1.5R, T2 = 3R.",
+        "Flat at the mandatory exit.", "Same as trend_pullback.", "Max 2 signals per direction per day.", "30 minutes to 3 hours")
+    default_filters = ("htf",)
+
+    def raw(self, d):
+        longs = (d.close.shift() < d.vwap.shift()) & (d.close > d.vwap) & (d.close > d.open) & (d.ema9 > d.ema21)
+        shorts = (d.close.shift() > d.vwap.shift()) & (d.close < d.vwap) & (d.close < d.open) & (d.ema9 < d.ema21)
+        longs = longs & (longs.groupby(d.date).cumsum() <= 2)
+        shorts = shorts & (shorts.groupby(d.date).cumsum() <= 2)
+        return longs, shorts, "price reclaimed VWAP in the direction of the trend"
+
+
+class GapFade(Strategy):
+    spec = StrategySpec(
+        "gap_fade", "1.0",
+        "After a gap of at least 0.2% from the prior close, price often drifts back toward the prior close once it starts turning that way.",
+        "Opening gap >= 0.2% versus the prior close; price still on the gap side of the prior close and at least 1 ATR away from it.",
+        "Before 11:30: bar closes beyond the prior bar's extreme toward the prior close, in its own direction, beyond the 9-period EMA.",
+        "None beyond the trigger.", "Price moves a further 1 ATR away from the prior close.", "1.0 x ATR(14).", "T1 = 1.0R, T2 = 2.0R.",
+        "Flat at the mandatory exit.", "Same as trend_pullback.", "Max 1 signal per direction per day.", "30 minutes to 3 hours")
+    stop_atr, t1_r, t2_r = 1.0, 1.0, 2.0
+    default_filters = ()
+
+    def raw(self, d):
+        day_open = d.groupby("date").open.transform("first")
+        gap = day_open / d.pdc - 1
+        early = d.tod <= "11:30"
+        longs = early & (gap <= -0.002) & (d.close < d.pdc) & ((d.pdc - d.close) >= d.atr) \
+            & (d.close > d.high.shift()) & (d.close > d.open) & (d.close > d.ema9)
+        shorts = early & (gap >= 0.002) & (d.close > d.pdc) & ((d.close - d.pdc) >= d.atr) \
+            & (d.close < d.low.shift()) & (d.close < d.open) & (d.close < d.ema9)
+        return _first_per_day(longs, d), _first_per_day(shorts, d), "gap fading back toward the prior close"
+
+
+class PriorDayBreak(Strategy):
+    spec = StrategySpec(
+        "prior_day_break", "1.0",
+        "A first close beyond yesterday's high (low), with the 1-hour trend behind it, tends to continue.",
+        "Prior-day high and low are known.",
+        "First 5-minute close of the day beyond the prior-day high (low), having been inside it on the previous close.",
+        "1h trend agrees; price on the correct side of VWAP.",
+        "Close back inside the prior-day range.", "1.5 x ATR(14).", "T1 = 1.5R, T2 = 3R.",
+        "Flat at the mandatory exit.", "Same as trend_pullback.", "Max 1 signal per direction per day.", "30 minutes to 4 hours")
+    default_filters = ("htf", "vwap")
+
+    def raw(self, d):
+        up = (d.close > d.pdh) & (d.close.shift() <= d.pdh)
+        dn = (d.close < d.pdl) & (d.close.shift() >= d.pdl)
+        return _first_per_day(up, d), _first_per_day(dn, d), "first close beyond the prior-day high/low"
+
+
+class SteadyScalper(TrendPullback):
+    """Same entries as trend_pullback, but a wide stop and a very near target. Built to SHOW the trade-off:
+    it wins often, yet each loss is large. Research only: its reward is too small versus risk to pass the risk manager."""
+    spec = StrategySpec(
+        "steady_scalper", "1.0",
+        "Same pullback entries as trend_pullback with a wide stop and a near target, to test what a high win rate costs.",
+        "Same as trend_pullback.", "Same as trend_pullback.", "Same as trend_pullback.", "Same as trend_pullback.",
+        "2.5 x ATR(14).", "T1 = 0.4R (half), T2 = 0.8R (half).", "Flat at the mandatory exit.", "n/a (research only)",
+        "Research only: blended reward:risk is below the 1.5 minimum.", "15 minutes to 2 hours")
+    stop_atr, t1_r, t2_r = 2.5, 0.4, 0.8
+
+
+REGISTRY = {c.spec.name: c for c in (TrendPullback, OrbRetest, FailedBreakout, RangeReversion, VolExpansion,
+                                             OrbBreakout, VwapReclaim, GapFade, PriorDayBreak, SteadyScalper)}
 BASELINE = BaselineHourlyTrend
 
 

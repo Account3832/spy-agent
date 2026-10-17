@@ -222,7 +222,7 @@ GRID_T1 = (1.0, 1.5, 2.0)
 
 
 def run_research(d: pd.DataFrame, s: Settings, strategy_names=None, grid: bool = True) -> dict:
-    names = list(strategy_names or s.enabled_strategies)
+    names = list(strategy_names or (*s.enabled_strategies, *s.research_only_strategies))
     dates = sorted(set(d.date))
     sp = chrono_split(dates)
     tv_dates = sp["train"] + sp["val"]

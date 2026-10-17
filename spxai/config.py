@@ -54,6 +54,8 @@ class Settings:
     min_trades_for_claim: int = 100
     enabled_strategies: tuple = ("trend_pullback", "orb_retest", "failed_breakout",
                                  "range_reversion", "vol_expansion")
+    # tested and reported, but NEVER used for live practice trades until they pass the fair test and are promoted here
+    research_only_strategies: tuple = ("orb_breakout", "vwap_reclaim", "gap_fade", "prior_day_break", "steady_scalper")
     # option selection
     target_delta: float = 0.35
     min_option_volume: int = 50

@@ -16,7 +16,7 @@ from .config import Settings
 from .strategies import BASELINE, REGISTRY
 
 COLUMNS = ["strategy", "date", "signal_time", "entry_time", "exit_time", "direction", "entry", "risk_per_share",
-           "gross_R", "net_R", "result", "pnl_usd_illustrative", "exit_reason", "regime", "tod_bucket", "trigger",
+           "stop_price", "target1_price", "target2_price", "exit_price", "gross_R", "net_R", "result", "pnl_usd_illustrative", "exit_reason", "regime", "tod_bucket", "trigger",
            "minutes_held", "month"]
 
 
@@ -30,7 +30,7 @@ def trade_log(d: pd.DataFrame, s: Settings, days: int = 730, names: list[str] | 
         return pd.DataFrame(columns=COLUMNS)
     start = pd.Timestamp(d.index[-1]).date() - dt.timedelta(days=days)
     budget = s.account_equity * s.max_risk_pct / 100.0
-    strategies = [REGISTRY[n]() for n in (names or s.enabled_strategies)] + [BASELINE()]
+    strategies = [REGISTRY[n]() for n in (names or (*s.enabled_strategies, *s.research_only_strategies))] + [BASELINE()]
     parts = []
     for strat in strategies:
         t = simulate(d, strat, s)
@@ -41,6 +41,10 @@ def trade_log(d: pd.DataFrame, s: Settings, days: int = 730, names: list[str] | 
             continue
         t["strategy"] = strat.name
         t["direction"] = t.dir.map({1: "LONG", -1: "SHORT"})
+        t["stop_price"] = (t.entry - t.dir * t.risk).round(2)
+        t["target1_price"] = (t.entry + t.dir * strat.t1_r * t.risk).round(2)
+        t["target2_price"] = (t.entry + t.dir * strat.t2_r * t.risk).round(2)
+        t["exit_price"] = (t.entry + t.dir * t.net_R * t.risk).round(2)   # average of both halves, after costs
         t["risk_per_share"] = t.risk.round(4)
         t["entry"] = t.entry.round(2)
         t["net_R"] = t.net_R.round(3)

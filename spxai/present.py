@@ -24,6 +24,17 @@ STRATEGIES = {
                         "On quiet sideways days, buys near the bottom of the range and sells near the top."),
     "vol_expansion": ("Volatility Breakout",
                       "Jumps in when a quiet stretch suddenly turns into a big move."),
+    "orb_breakout": ("Opening Range Breakout",
+                     "Buys the first break above the first 30 minutes' high (or sells the first break below its low) when the 1-hour trend agrees."),
+    "vwap_reclaim": ("VWAP Reclaim",
+                     "In a trend, waits for price to dip through the day's average price and snap back, then joins the trend."),
+    "gap_fade": ("Gap Fade",
+                 "After a big overnight gap, bets that price drifts back toward yesterday's close once it starts to turn."),
+    "prior_day_break": ("Yesterday's High/Low Break",
+                        "Joins the first break above yesterday's high (or below yesterday's low) when the 1-hour trend agrees."),
+    "steady_scalper": ("Steady Scalper (high win rate test)",
+                       "Same entries as Trend Pullback, but a wide stop and a very near target. It wins often, but each loss is big. "
+                       "Built to show what a high win rate costs."),
     "baseline_hourly_trend": ("Simple 1-hour trend (comparison)",
                               "The simplest rule: follow the 1-hour trend once a day. A yardstick the others should beat."),
 }
@@ -186,7 +197,7 @@ def next_check_text(now: pd.Timestamp) -> str:
 
 # --------------------------------------------------------- results tables
 
-def scoreboard(ts: dict, bt: dict, risk: float) -> pd.DataFrame:
+def scoreboard(ts: dict, bt: dict, risk: float, live=()) -> pd.DataFrame:
     rows = []
     for key, r in (ts.get("strategies") or {}).items():
         v = ((bt or {}).get("strategies") or {}).get(key, {}).get("verdict")
@@ -197,7 +208,9 @@ def scoreboard(ts: dict, bt: dict, risk: float) -> pd.DataFrame:
                      "Total result ($)": round(r["total_net_R"] * risk, 0),
                      "Worst losing stretch ($)": round(-(r.get("max_drawdown_R") or 0) * risk, 0),
                      "Fair test": verdict_info(v)[0] if v else "comparison only",
-                     "_tone": verdict_info(v)[1] if v else "muted", "_key": key})
+                     "_tone": verdict_info(v)[1] if v else "muted", "_key": key,
+                     "Status": ("Comparison" if key == "baseline_hourly_trend" else
+                                ("Live practice" if key in live else "Research only"))})
     df = pd.DataFrame(rows)
     return df.sort_values("Total result ($)", ascending=False).reset_index(drop=True) if len(df) else df
 
@@ -252,7 +265,9 @@ def trades_view(tl: pd.DataFrame) -> pd.DataFrame:
         "Buy or sell": t["direction"].map(lambda d: "Buy" if d == "LONG" else "Sell"),
         "Result": t["result"].map({"WIN": "Win", "LOSS": "Loss", "FLAT": "Even"}),
         "Result ($)": t["pnl_usd_illustrative"], "How it ended": t["exit_reason"].map(exit_text),
-        "Market type": t["regime"].map(lambda r: REGIMES.get(r, r)), "Time of day": t["tod_bucket"].map(bucket_label)})
+        "Market type": t["regime"].map(lambda r: REGIMES.get(r, r)), "Time of day": t["tod_bucket"].map(bucket_label),
+        **({"Got in at ($)": t["entry"], "Stop was ($)": t["stop_price"], "Target 1 ($)": t["target1_price"],
+            "Target 2 ($)": t["target2_price"], "Got out at ($)": t["exit_price"]} if "stop_price" in t else {})})
 
 
 def reliability_table(bt: dict, risk: float) -> pd.DataFrame:
@@ -266,3 +281,50 @@ def reliability_table(bt: dict, risk: float) -> pd.DataFrame:
                      "Plausible range, high ($)": round((o.get("ci_high") or 0) * risk, 2),
                      "Verdict": v[0], "What it means": v[2]})
     return pd.DataFrame(rows)
+
+
+# ------------------------------------------------------------ trade chart
+
+def trade_option_label(r) -> str:
+    et = pd.to_datetime(r["entry_time"], utc=True).tz_convert(TZ)
+    when = et.strftime("%b %d, %I:%M %p").replace(" 0", " ")
+    side = "Buy" if r["direction"] == "LONG" else "Sell"
+    res = {"WIN": "Win", "LOSS": "Loss", "FLAT": "Even"}.get(r["result"], r["result"])
+    return f"{when}  ·  {side}  ·  {res} {usd(r['pnl_usd_illustrative'])}"
+
+
+def trade_levels(entry: float, risk: float, k: int, t1_r: float, t2_r: float, net_R: float) -> dict:
+    """Stop, targets and average exit price implied by a trade's entry, risk and result (same maths as the simulator)."""
+    return {"stop_price": round(entry - k * risk, 2), "target1_price": round(entry + k * t1_r * risk, 2),
+            "target2_price": round(entry + k * t2_r * risk, 2), "exit_price": round(entry + k * net_R * risk, 2)}
+
+
+def paper_trade_dict(row, registry: dict, budget_hint: float = 0.0) -> dict:
+    """Turn a closed paper-trade row into the same shape the 2-year log uses, so one chart can draw both."""
+    k = int(row["dir"])
+    cls = registry.get(row["strategy"])
+    t1_r, t2_r = (cls().t1_r, cls().t2_r) if cls else (1.5, 3.0)
+    lv = trade_levels(float(row["entry"]), float(row["risk_per_share"]), k, t1_r, t2_r, float(row["net_R"]))
+    pnl = float(row["pnl_usd"]) if "pnl_usd" in row and pd.notna(row["pnl_usd"]) else float(row["net_R"]) * budget_hint
+    et = pd.to_datetime(row["entry_time"], utc=True).tz_convert(TZ)
+    return {"date": str(et.date()), "entry_time": str(row["entry_time"]), "exit_time": str(row["exit_time"]),
+            "direction": "LONG" if k == 1 else "SHORT", "entry": float(row["entry"]), **lv,
+            "result": _wl_label(float(row["net_R"])), "pnl_usd_illustrative": pnl, "exit_reason": str(row["exit_reason"]),
+            "strategy": row["strategy"]}
+
+
+def _wl_label(r: float) -> str:
+    return "WIN" if r > 0 else ("LOSS" if r < 0 else "FLAT")
+
+
+def win_rate_lesson(sb: pd.DataFrame) -> str | None:
+    """Shows, from the user's own results, that a high win rate and making money are different things."""
+    need = {"steady_scalper", "trend_pullback"}
+    if sb is None or len(sb) == 0 or not need <= set(sb["_key"]):
+        return None
+    a = sb[sb["_key"] == "steady_scalper"].iloc[0]
+    b = sb[sb["_key"] == "trend_pullback"].iloc[0]
+    return (f"**A high win rate is not the same as making money.** The Steady Scalper wins {a['Win rate']:.0f} of every 100 trades, "
+            f"far more than Trend Pullback ({b['Win rate']:.0f} of 100). But its wins are small and its losses are big: its total result is "
+            f"{usd(a['Total result ($)'])}, against {usd(b['Total result ($)'])} for Trend Pullback. "
+            f"Chasing a very high win rate usually means taking a small profit and risking a lot, and one bad day can erase many wins.")
