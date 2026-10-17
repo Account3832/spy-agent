@@ -28,15 +28,16 @@ for k in ("ALPACA_KEY_ID", "ALPACA_SECRET_KEY", "SPXAI_STATE_URL", "GITHUB_TOKEN
 
 from spxai import calendar as cal
 from spxai import present as P
+from spxai import spreads as SP
 from spxai.config import TZ, load_settings, state_dir
 from spxai.features import add_features, make_hourly
 from spxai.providers import NO_OPTIONS_MSG, REGISTRY, cost_violations, get_intraday
 from spxai.strategies import REGISTRY as STRATS
 
 S = load_settings()
-st.set_page_config(page_title="SPY Trading Assistant", page_icon="📈", layout="wide")
+st.set_page_config(page_title="SPY Trading Terminal", page_icon="📈", layout="wide")
 
-GREEN, RED, AMBER, BLUE = "#16a34a", "#dc2626", "#d97706", "#2563eb"
+GREEN, RED, AMBER, BLUE = "#22c55e", "#ef4444", "#f59e0b", "#3b82f6"
 
 st.markdown("""
 <style>
@@ -73,6 +74,48 @@ h1,h2,h3{letter-spacing:-.01em}
 .sec{font-size:1.15rem;font-weight:720;margin:1.2rem 0 .2rem 0}
 .hint{font-size:.88rem;opacity:.7;margin-bottom:.6rem}
 button[data-baseweb="tab"]{font-weight:650}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<style>
+/* ---- trading-terminal skin (dark, dense, monospace numbers) ---- */
+:root{--bg:#0a0e14;--panel:#0f1620;--line:#1c2736;--ink:#d5deea;--mute:#7d8ea3;--amber:#f59e0b}
+.stApp{background:var(--bg);color:var(--ink)}
+[data-testid="stSidebar"]{background:#0c121b;border-right:1px solid var(--line)}
+[data-testid="stHeader"]{background:transparent}
+.block-container{padding-top:1rem;max-width:1500px}
+.kpi .value,.card .big,.tk .v,.hero .headline,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.kpi,.card,.hero{border-radius:6px;background:var(--panel);border:1px solid var(--line)}
+.hero{background:linear-gradient(90deg,rgba(245,158,11,.10),var(--panel) 55%)}
+.hero.good{background:linear-gradient(90deg,rgba(34,197,94,.18),var(--panel) 60%);border-color:rgba(34,197,94,.5)}
+.hero.bad{background:linear-gradient(90deg,rgba(239,68,68,.18),var(--panel) 60%);border-color:rgba(239,68,68,.5)}
+.hero .headline{font-size:1.9rem}
+.kpi .label,.hero .eyebrow,.card .b{color:var(--mute);opacity:1}
+.chip{border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;text-transform:uppercase;letter-spacing:.04em;font-size:.68rem}
+.sec{font-size:.8rem;text-transform:uppercase;letter-spacing:.12em;color:var(--amber);border-bottom:1px solid var(--line);padding-bottom:4px}
+.hint{color:var(--mute);opacity:1}
+button[data-baseweb="tab"]{text-transform:uppercase;letter-spacing:.07em;font-size:.78rem}
+button[data-baseweb="tab"][aria-selected="true"]{color:var(--amber)}
+div[data-baseweb="tab-highlight"]{background-color:var(--amber)!important}
+.topbar{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);background:#0c121b;
+  border-radius:6px;padding:8px 14px;margin-bottom:6px}
+.brand{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:800;letter-spacing:.14em;color:var(--amber)}
+.brand small{color:var(--mute);font-weight:500;letter-spacing:.06em;margin-left:10px}
+.tape{display:flex;flex-wrap:wrap;border:1px solid var(--line);background:var(--panel);border-radius:6px;margin-bottom:10px}
+.tk{padding:8px 16px;border-right:1px solid var(--line);min-width:112px}
+.tk:last-child{border-right:0}
+.tk .l{font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--mute)}
+.tk .v{font-size:1.12rem;font-weight:700}
+.tk .v.up,.up{color:#22c55e}.tk .v.dn,.dn{color:#ef4444}.tk .v.am{color:var(--amber)}
+.tk.big .v{font-size:1.6rem}
+.idea{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:12px 14px;margin-bottom:12px;height:100%}
+.idea.good{border-left:3px solid #22c55e}.idea.warn{border-left:3px solid #f59e0b}.idea.bad{border-left:3px solid #ef4444}
+.idea .h{font-weight:700;font-size:.95rem}.idea .legs{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.02rem;margin:6px 0}
+.idea .row{display:flex;justify-content:space-between;font-size:.82rem;padding:2px 0;border-bottom:1px dotted var(--line)}
+.idea .row span:first-child{color:var(--mute)}.idea .row span:last-child{font-family:ui-monospace,Menlo,Consolas,monospace}
+.idea .why{font-size:.76rem;color:var(--mute);margin-top:6px}
+.idea .fl{font-size:.76rem;color:#f59e0b;margin-top:4px}
 </style>
 """, unsafe_allow_html=True)
 
@@ -184,7 +227,7 @@ def breaks(x_index):
 
 
 def style(fig, height=None):
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(size=13),
+    fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(15,22,32,0.6)", font=dict(size=13),
                       margin=dict(l=10, r=10, t=50, b=10), legend=dict(orientation="h", y=1.08))
     if height:
         fig.update_layout(height=height)
@@ -280,6 +323,28 @@ def trade_chart(tr, heading):
     return fig
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def snapshot():
+    """Ticker-tape numbers from the newest bars: last, change vs prior close, day range, VWAP."""
+    try:
+        df, _, _ = live_bars()
+        if df is None or len(df) < 2:
+            return {}
+        d = df.copy()
+        d["_d"] = d.index.date
+        days = sorted(set(d["_d"]))
+        today = d[d["_d"] == days[-1]]
+        prev = float(d[d["_d"] == days[-2]].close.iloc[-1]) if len(days) > 1 else float(today.open.iloc[0])
+        tp = (today.high + today.low + today.close) / 3.0
+        vol = today.volume.replace(0, float("nan")) if "volume" in today else None
+        vwap = float((tp * today.volume).sum() / today.volume.sum()) if vol is not None and today.volume.sum() > 0 else float(tp.mean())
+        last = float(today.close.iloc[-1])
+        return {"last": last, "prev": prev, "chg": last - prev, "chg_pct": (last / prev - 1) * 100, "hi": float(today.high.max()),
+                "lo": float(today.low.min()), "vwap": vwap, "asof": today.index[-1].strftime("%b %d %H:%M")}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 # --------------------------------------------------------------------- data
 
 run = read_json("latest_run.json") or {}
@@ -294,18 +359,25 @@ dec = plan.get("decision", "no run yet")
 
 # ------------------------------------------------------------------- header
 
-st.markdown('<div class="app-title">SPY Trading Assistant</div>'
-            '<div class="app-sub">Practice mode: fake money. It shows what the rules would do. It never places an order.</div>',
-            unsafe_allow_html=True)
 fresh_label, fresh_tone = P.freshness(plan, NOW)
 mkt = ("Market open", "good") if cal.is_open(NOW) else ("Market closed", "")
-st.markdown(chip("PRACTICE MODE", "blue") + chip(mkt[0], mkt[1]) + chip(fresh_label, fresh_tone)
-            + chip("Source: " + str(plan.get("data_source", "n/a")).replace("_", " ")), unsafe_allow_html=True)
-st.caption(NO_OPTIONS_MSG + " Trades are simulated with SPY shares.")
+st.markdown(f'<div class="topbar"><div class="brand">SPY TERMINAL<small>PAPER TRADING &middot; NO ORDERS EVER SENT</small></div>'
+            f'<div>{chip("PAPER", "blue")}{chip(mkt[0], mkt[1])}{chip(fresh_label, fresh_tone)}'
+            f'{chip("Source: " + str(plan.get("data_source", "n/a")).replace("_", " "))}</div></div>', unsafe_allow_html=True)
+snap = snapshot()
+if snap:
+    tone = "up" if snap["chg"] >= 0 else "dn"
+    sig = {"CALL": ("LONG SIGNAL", "up"), "PUT": ("SHORT SIGNAL", "dn")}.get(dec, ("NO TRADE", "am"))
+    cells = [("SPY", f'{snap["last"]:,.2f}', tone, "big"), ("Change", f'{snap["chg"]:+.2f} ({snap["chg_pct"]:+.2f}%)', tone, ""),
+             ("Day range", f'{snap["lo"]:,.2f} - {snap["hi"]:,.2f}', "", ""), ("VWAP", f'{snap["vwap"]:,.2f}', "up" if snap["last"] >= snap["vwap"] else "dn", ""),
+             ("Prior close", f'{snap["prev"]:,.2f}', "", ""), ("Signal", sig[0], sig[1], ""), ("Bars as of", snap["asof"], "", "")]
+    st.markdown('<div class="tape">' + "".join(f'<div class="tk {esc(c)}"><div class="l">{esc(l)}</div><div class="v {esc(t)}">{esc(v)}</div></div>'
+                                              for l, v, t, c in cells) + '</div>', unsafe_allow_html=True)
+st.caption(NO_OPTIONS_MSG + " Practice trades are simulated with SPY shares; spread ideas use ESTIMATED option prices.")
 if plan.get("data_status") == "delayed":
     st.warning("The price data is delayed or from an unofficial source. Check prices with your broker before acting.")
 
-tabs = st.tabs(["Today", "Charts", "2-year results", "Reliability test", "Paper trades", "Agents", "Data & health", "Logs"])
+tabs = st.tabs(["Today", "Spreads", "Charts", "2-year results", "Reliability test", "Paper trades", "Agents", "Data & health", "Logs"])
 
 # -------------------------------------------------------------------- TODAY
 
@@ -371,9 +443,110 @@ with tabs[0]:
              ("Practice result", P.usd(pt0.pnl_usd.sum()) if len(pt0) and "pnl_usd" in pt0 else "$0", "fake money",
               money_tone(pt0.pnl_usd.sum()) if len(pt0) and "pnl_usd" in pt0 else "")])
 
-# ------------------------------------------------------------------- CHARTS
+# ------------------------------------------------------------------ SPREADS
 
 with tabs[1]:
+    section("Credit spread ideas on SPY", "Sell one option, buy a cheaper one further away as insurance, and collect money up front. PRACTICE ONLY.")
+    st.info("Real option prices are not available on the free data plan, so every credit and chance below is an ESTIMATE from a standard "
+            "pricing formula. Your broker's real prices will differ. Use these as a checklist for paper trades, not as signals.")
+    live_df, _src, _err = live_bars()
+    base = stored_bars()
+    daily = SP.daily_from_bars(base if len(base) else live_df)
+    if len(live_df) < 50 or len(daily) < 30:
+        st.info("Not enough saved prices yet. Run the 'Daily ingest and backtest' job on GitHub first.")
+    else:
+        spot = float(live_df.close.iloc[-1])
+        try:
+            ema_h = float(make_hourly(live_df)["h_ema20"].dropna().iloc[-1])
+        except Exception:  # noqa: BLE001
+            ema_h = None
+        vw = snap.get("vwap") if snap else None
+        bias_label = SP.bias(spot, ema_h, vw)
+        rv = SP.realized_vol(daily) or 0.18
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            mult = st.slider("Volatility assumption", 0.8, 1.6, 1.15, 0.05,
+                             help="Options usually price in a bit more movement than SPY recently showed. Higher = bigger estimated credits and wider typical moves.")
+        with c2:
+            width = st.selectbox("Spread width ($)", [1, 2, 5], index=0, help="Distance between the strike you sell and the one you buy. Wider = more money at risk.")
+        with c3:
+            kind_f = st.selectbox("Show", ["All", "Bear call spread", "Bull put spread", "Iron condor"])
+        exps = SP.expiry_dates(NOW.date())
+        with c4:
+            exp_f = st.selectbox("Expiry", ["All"] + [e.strftime("%a %b %d") for e in exps])
+        sigma = rv * mult
+        lv = SP.key_levels(daily, spot, ema_h, vw, today=NOW.date())
+        ideas = SP.build_ideas(spot, sigma, NOW.date(), lv, bias_label, daily, width=int(width), risk_usd=float(RISK), expiries=exps)
+        if kind_f != "All":
+            ideas = [i for i in ideas if i["kind"] == kind_f]
+        if exp_f != "All":
+            ideas = [i for i in ideas if i["expiry"].strftime("%a %b %d") == exp_f]
+        bias_txt = {"bearish": "Down (bearish)", "bullish": "Up (bullish)", "neutral": "Sideways (neutral)"}[bias_label]
+        kpi_row([("SPY now", price(spot), "latest saved price", ""), ("Trend read", bias_txt, "price vs the hourly trend line",
+                                                                      "bad" if bias_label == "bearish" else ("good" if bias_label == "bullish" else "")),
+                 ("Volatility used", f"{sigma * 100:.1f}%", f"recent {rv * 100:.1f}% x {mult:g}", ""),
+                 ("Your risk limit", P.usd(RISK, sign=False), "per trade, from your settings", "")])
+        if lv:
+            st.caption("Key levels used to place strikes: " + "  |  ".join(f"{k} {v:,.2f}" for k, v in sorted(lv.items(), key=lambda kv: -kv[1])))
+        if not ideas:
+            st.info("No ideas match those filters.")
+        for row_start in range(0, min(len(ideas), 6), 3):
+            cols = st.columns(3)
+            for col, i in zip(cols, ideas[row_start: row_start + 3]):
+                label, tone = SP.verdict(i)
+                be_win = i["max_loss"] / (i["max_loss"] + i["max_profit"]) * 100 if (i["max_loss"] + i["max_profit"]) > 0 else 0
+                if i["kind"] == "Iron condor":
+                    legs = f'SELL {esc(i["short"])}<br>BUY {esc(i["long"])}'
+                else:
+                    legs = f'SELL {i["short"]} / BUY {i["long"]} {i["side"]}'
+                hist = (f'{i["hist_breach"] * 100:.0f}% of {i["sessions"]}-day windows' if i["hist_breach"] is not None else "n/a")
+                col.markdown(
+                    f'<div class="idea {esc(tone)}"><div class="h">{esc(i["kind"])} &middot; {esc(i["tier"])} &nbsp;{chip(label, tone)}</div>'
+                    f'<div class="legs">{legs}</div>'
+                    f'<div class="row"><span>Expires</span><span>{esc(i["expiry"].strftime("%a %b %d"))} ({i["days"]}d)</span></div>'
+                    f'<div class="row"><span>Collect (estimate)</span><span class="up">${i["credit"]:.2f} = ${i["max_profit"]:.0f}</span></div>'
+                    f'<div class="row"><span>Most you can lose</span><span class="dn">${i["max_loss"]:.0f}</span></div>'
+                    f'<div class="row"><span>Break-even price</span><span>{esc(i["breakeven"])}</span></div>'
+                    f'<div class="row"><span>Est. chance you keep it</span><span>{i["p_keep"] * 100:.0f}%</span></div>'
+                    f'<div class="row"><span>Win rate needed to break even</span><span>{be_win:.0f}%</span></div>'
+                    f'<div class="row"><span>SPY really went that far</span><span>{esc(hist)}</span></div>'
+                    f'<div class="why">Placed by: {esc(i["anchor"])}. Contracts within your limit: {i["contracts_in_budget"]}.</div>'
+                    + "".join(f'<div class="fl">! {esc(f)}</div>' for f in i["flags"]) + '</div>', unsafe_allow_html=True)
+        if ideas:
+            section("Profit and loss at expiry", "Pick an idea to see what you would make or lose for each SPY price on the expiry day (per contract).")
+            names = [f'{i["kind"]} | {i["tier"]} | {i["expiry"].strftime("%b %d")} | {i["short"]}/{i["long"]}' for i in ideas]
+            pick = ideas[names.index(st.selectbox("Idea", names))]
+            xs, ys = SP.payoff(pick, spot)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=xs, y=[max(y, 0) for y in ys], mode="lines", line=dict(color=GREEN, width=2), fill="tozeroy",
+                                     fillcolor="rgba(34,197,94,0.18)", name="Profit"))
+            fig.add_trace(go.Scatter(x=xs, y=[min(y, 0) for y in ys], mode="lines", line=dict(color=RED, width=2), fill="tozeroy",
+                                     fillcolor="rgba(239,68,68,0.18)", name="Loss"))
+            fig.add_vline(x=spot, line_dash="dash", annotation_text=f"SPY now {spot:,.2f}")
+            for strike, kind, act in pick["legs"]:
+                if act == "SELL":
+                    fig.add_vline(x=strike, line_dash="dot", line_color=AMBER, annotation_text=f"sold {strike}", annotation_position="bottom")
+            fig.update_layout(title="Result per contract if held to expiry", xaxis_title="SPY price at expiry", yaxis_title="Profit / loss ($)")
+            st.plotly_chart(style(fig, 420), use_container_width=True)
+            st.markdown("**Practice ticket** (copy into your paper-trading account):")
+            st.code(pick["ticket"], language="text")
+            exp_rows = pd.DataFrame([{k: (str(v) if k in ("expiry", "legs") else v) for k, v in i.items() if k != "flags"} | {"flags": "; ".join(i["flags"])} for i in ideas])
+            st.download_button("Download these ideas (CSV)", exp_rows.to_csv(index=False), "spread_ideas.csv", "text/csv")
+        with st.expander("How to read this (plain English)"):
+            st.markdown(
+                "- **Bear call spread:** you win if SPY stays BELOW the strike you sold. Used when you expect flat or falling prices.\n"
+                "- **Bull put spread:** you win if SPY stays ABOVE the strike you sold. Used when you expect flat or rising prices.\n"
+                "- **Iron condor:** both at once. You win if SPY stays between the two sold strikes. Poor fit when the market is trending.\n"
+                "- **Collect:** money you receive up front. It is also the most you can ever make.\n"
+                "- **Most you can lose:** the width of the spread minus what you collected. One bad outcome can erase several small wins.\n"
+                "- **Win rate needed to break even:** if this is 75%, you must win 3 out of 4 times just to come out even. Compare it with the chance you keep it.\n"
+                "- **SPY really went that far:** in the saved history, how often SPY traded that far past the price in the same number of days. It is a reality check on the estimate, not a promise.\n"
+                "- **Closer / Standard / Safer:** how far from today's price the sold strike is. Closer pays more but is hit more often.")
+        st.caption("Spreads can lose the full width. Early assignment and weekend gaps are real. Test with paper money for 20+ trades before trusting any of this. Not financial advice.")
+
+# ------------------------------------------------------------------- CHARTS
+
+with tabs[2]:
     df, src, err = live_bars()
     if err:
         st.warning("Could not get the newest prices, so this shows saved history. " + str(err)[:160])
@@ -412,7 +585,7 @@ with tabs[1]:
 
 # ------------------------------------------------------------- 2-YEAR RESULTS
 
-with tabs[2]:
+with tabs[3]:
     if not ts or not ts.get("strategies"):
         st.info("No results yet. Run the 'Daily ingest and backtest' job on GitHub (it needs at least about 5 days of saved data).")
     else:
@@ -517,7 +690,7 @@ with tabs[2]:
 
 # ---------------------------------------------------------- RELIABILITY TEST
 
-with tabs[3]:
+with tabs[4]:
     if "strategies" not in bt:
         st.info("No reliability test yet. The daily job on GitHub creates it once about 5 days of data are saved.")
     else:
@@ -555,7 +728,7 @@ with tabs[3]:
 
 # ------------------------------------------------------------- PAPER TRADES
 
-with tabs[4]:
+with tabs[5]:
     pt = read_csv("paper_trades.csv")
     st.caption("Practice trades with fake money, using SPY shares (not options). These are the best check of the rules, because they happen on new days.")
     open_pos = read_json("open_positions.json") or []
@@ -597,7 +770,7 @@ with tabs[4]:
 
 # ------------------------------------------------------------------- AGENTS
 
-with tabs[5]:
+with tabs[6]:
     st.caption("Eleven small checkers each look at one part of the picture. A separate risk checker can say no. None of them places an order.")
     if not agents:
         st.info("No checker results recorded yet.")
@@ -616,7 +789,7 @@ with tabs[5]:
 
 # ------------------------------------------------------------ DATA & HEALTH
 
-with tabs[6]:
+with tabs[7]:
     viol = cost_violations(S)
     kpi_row([("Data source", str(health.get("source", plan.get("data_source", "n/a"))).replace("_", " "), "where prices come from", ""),
              ("Days saved", str(health.get("history_days", "n/a")), "trading days of 5-minute data", ""),
@@ -636,7 +809,7 @@ with tabs[6]:
 
 # --------------------------------------------------------------------- LOGS
 
-with tabs[7]:
+with tabs[8]:
     section("Alerts", "Messages the system generated. They are notes, not orders.")
     al = read_jsonl("alerts.jsonl", 100)
     st.dataframe(pd.DataFrame(al).iloc[::-1] if al else pd.DataFrame(), use_container_width=True, hide_index=True)
