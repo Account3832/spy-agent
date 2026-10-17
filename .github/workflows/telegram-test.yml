@@ -1,0 +1,19 @@
+name: Telegram test
+# Sends one test message to your phone. Needs the repo secrets TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements-core.txt
+      - name: Send test message
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m spxai.runner telegram-test
