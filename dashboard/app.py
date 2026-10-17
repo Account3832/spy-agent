@@ -1,9 +1,10 @@
-"""Streamlit dashboard (read-only). PAPER TRADING ONLY. Nothing here can place an order.
+"""SPY Trading Assistant: read-only dashboard. PRACTICE (PAPER) MODE ONLY. Nothing here can place an order.
 
 Reads the state written by the scheduled jobs: from a local folder (SPXAI_STATE_DIR) or from the
 `data` branch of your GitHub repo (SPXAI_STATE_URL = https://raw.githubusercontent.com/<you>/<repo>/data).
-Live chart data is fetched on demand (Alpaca free keys in Streamlit secrets, else Yahoo fallback).
+All wording and number formatting lives in spxai/present.py (unit-tested); this file only lays things out.
 """
+import html
 import io
 import json
 import os
@@ -26,12 +27,85 @@ for k in ("ALPACA_KEY_ID", "ALPACA_SECRET_KEY", "SPXAI_STATE_URL", "GITHUB_TOKEN
         pass
 
 from spxai import calendar as cal
+from spxai import present as P
 from spxai.config import TZ, load_settings, state_dir
 from spxai.features import add_features, make_hourly
 from spxai.providers import NO_OPTIONS_MSG, REGISTRY, cost_violations, get_intraday
 
 S = load_settings()
-st.set_page_config(page_title="SPY Multi-Agent Research (Paper)", layout="wide")
+st.set_page_config(page_title="SPY Trading Assistant", page_icon="📈", layout="wide")
+
+GREEN, RED, AMBER, BLUE = "#16a34a", "#dc2626", "#d97706", "#2563eb"
+
+st.markdown("""
+<style>
+.block-container{padding-top:2.2rem;max-width:1180px}
+h1,h2,h3{letter-spacing:-.01em}
+.app-title{font-size:2rem;font-weight:750;margin:0;letter-spacing:-.02em}
+.app-sub{opacity:.65;margin:.2rem 0 .9rem 0}
+.chip{display:inline-block;padding:3px 11px;border-radius:999px;font-size:.76rem;font-weight:650;margin:0 6px 6px 0;
+  border:1px solid rgba(128,128,128,.35);background:rgba(128,128,128,.10)}
+.chip.good{color:#16a34a;border-color:rgba(22,163,74,.45);background:rgba(22,163,74,.12)}
+.chip.bad{color:#dc2626;border-color:rgba(220,38,38,.45);background:rgba(220,38,38,.12)}
+.chip.warn{color:#d97706;border-color:rgba(217,119,6,.5);background:rgba(217,119,6,.13)}
+.chip.blue{color:#2563eb;border-color:rgba(37,99,235,.45);background:rgba(37,99,235,.12)}
+.hero{border-radius:20px;padding:26px 30px;margin:.4rem 0 1rem 0;border:1px solid rgba(128,128,128,.28);
+  background:linear-gradient(135deg,rgba(128,128,128,.10),rgba(128,128,128,.03))}
+.hero.good{background:linear-gradient(135deg,rgba(22,163,74,.20),rgba(128,128,128,.03));border-color:rgba(22,163,74,.5)}
+.hero.bad{background:linear-gradient(135deg,rgba(220,38,38,.20),rgba(128,128,128,.03));border-color:rgba(220,38,38,.5)}
+.hero .eyebrow{font-size:.74rem;letter-spacing:.09em;text-transform:uppercase;opacity:.6;font-weight:650}
+.hero .headline{font-size:2.3rem;font-weight:780;line-height:1.15;margin:.25rem 0 .35rem 0;letter-spacing:-.02em}
+.hero .sub{font-size:1.02rem;opacity:.8;max-width:760px}
+.kpi{border-radius:14px;padding:14px 18px;border:1px solid rgba(128,128,128,.25);background:rgba(128,128,128,.06);height:100%}
+.kpi .label{font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;opacity:.65;font-weight:650}
+.kpi .value{font-size:1.65rem;font-weight:740;margin-top:2px}
+.kpi .value.good{color:#16a34a}.kpi .value.bad{color:#dc2626}
+.kpi .note{font-size:.8rem;opacity:.65;margin-top:2px}
+.card{border-radius:16px;padding:18px 20px;border:1px solid rgba(128,128,128,.28);background:rgba(128,128,128,.05);height:100%;margin-bottom:12px}
+.card .t{font-weight:720;font-size:1.05rem}
+.card .b{font-size:.8rem;opacity:.62;min-height:2.6rem;margin:2px 0 8px 0}
+.card .big{font-size:2rem;font-weight:780;letter-spacing:-.02em;line-height:1.1}
+.card .big.good{color:#16a34a}.card .big.bad{color:#dc2626}
+.card .n{font-size:.82rem;opacity:.72;margin-top:3px}
+.bar{height:7px;border-radius:99px;background:rgba(128,128,128,.22);margin:10px 0 6px 0;overflow:hidden}
+.bar>div{height:100%;border-radius:99px;background:#2563eb}
+.sec{font-size:1.15rem;font-weight:720;margin:1.2rem 0 .2rem 0}
+.hint{font-size:.88rem;opacity:.7;margin-bottom:.6rem}
+button[data-baseweb="tab"]{font-weight:650}
+</style>
+""", unsafe_allow_html=True)
+
+
+def esc(x):
+    return html.escape(str(x))
+
+
+def chip(text, tone=""):
+    return f'<span class="chip {esc(tone)}">{esc(text)}</span>'
+
+
+def kpi(label, value, note="", tone=""):
+    return (f'<div class="kpi"><div class="label">{esc(label)}</div><div class="value {esc(tone)}">{esc(value)}</div>'
+            f'<div class="note">{esc(note)}</div></div>')
+
+
+def kpi_row(items):
+    for col, it in zip(st.columns(len(items)), items):
+        col.markdown(kpi(*it), unsafe_allow_html=True)
+
+
+def section(title, hint=""):
+    st.markdown(f'<div class="sec">{esc(title)}</div>' + (f'<div class="hint">{esc(hint)}</div>' if hint else ""),
+                unsafe_allow_html=True)
+
+
+def money_tone(x):
+    return "good" if x and x > 0 else ("bad" if x and x < 0 else "")
+
+
+def price(x):
+    return "n/a" if x is None else f"${float(x):,.2f}"
+
 
 # ------------------------------------------------------------------ state IO
 
@@ -97,7 +171,7 @@ def live_bars():
             from spxai.store import load_bars
             df = load_bars(S.symbol, "5m")
         df.index = pd.DatetimeIndex(pd.to_datetime(df.index, utc=True)).tz_convert(TZ)
-        return df, "stored history (live fetch failed)", err
+        return df, "saved history (live fetch failed)", err
     except Exception as e2:  # noqa: BLE001
         return pd.DataFrame(), "none", f"{err}; stored: {e2}"
 
@@ -108,13 +182,22 @@ def breaks(x_index):
     return [dict(bounds=["sat", "mon"]), dict(bounds=[16, 9.5], pattern="hour"), dict(values=[d for d in off if d.weekday() < 5])]
 
 
+def style(fig, height=None):
+    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(size=13),
+                      margin=dict(l=10, r=10, t=50, b=10), legend=dict(orientation="h", y=1.08))
+    if height:
+        fig.update_layout(height=height)
+    return fig
+
+
 def candles(df, title, ema_cols, extra_lines=None, levels=None, rsi=True):
     x = df.index.tz_localize(None)
     fig = make_subplots(rows=2 if rsi else 1, cols=1, shared_xaxes=True, row_heights=[0.78, 0.22] if rsi else [1], vertical_spacing=0.03)
-    fig.add_trace(go.Candlestick(x=x, open=df.open, high=df.high, low=df.low, close=df.close, name="Price"), row=1, col=1)
+    fig.add_trace(go.Candlestick(x=x, open=df.open, high=df.high, low=df.low, close=df.close, name="Price",
+                                 increasing_line_color=GREEN, decreasing_line_color=RED), row=1, col=1)
     for col, name in ema_cols:
         if col in df:
-            fig.add_trace(go.Scatter(x=x, y=df[col], name=name, mode="lines", line=dict(width=1.3)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=x, y=df[col], name=name, mode="lines", line=dict(width=1.5)), row=1, col=1)
     for col, name in (extra_lines or []):
         if col in df:
             fig.add_trace(go.Scatter(x=x, y=df[col], name=name, mode="lines", line=dict(width=1, dash="dot")), row=1, col=1)
@@ -122,222 +205,355 @@ def candles(df, title, ema_cols, extra_lines=None, levels=None, rsi=True):
         if y is not None:
             fig.add_hline(y=y, line_dash="dash", line_width=1, annotation_text=label, annotation_position="top left", row=1, col=1)
     if rsi and "rsi" in df:
-        fig.add_trace(go.Scatter(x=x, y=df.rsi, name="RSI 14", line=dict(width=1.2)), row=2, col=1)
+        fig.add_trace(go.Scatter(x=x, y=df.rsi, name="Momentum (RSI)", line=dict(width=1.2)), row=2, col=1)
         for lv in (30, 70):
             fig.add_hline(y=lv, line_dash="dot", line_width=1, row=2, col=1)
     fig.update_xaxes(rangebreaks=breaks(x))
-    fig.update_layout(height=620, title=title, xaxis_rangeslider_visible=False, margin=dict(l=10, r=10, t=50, b=10),
-                      legend=dict(orientation="h", y=1.06))
-    return fig
+    fig.update_layout(title=title, xaxis_rangeslider_visible=False)
+    return style(fig, 600)
 
 
-# --------------------------------------------------------------------- page
-
-st.title("SPY multi-agent research dashboard")
-st.error("PAPER TRADING / RESEARCH ONLY. Nothing here is an order, a recommendation, or a guarantee. "
-         + NO_OPTIONS_MSG)
+# --------------------------------------------------------------------- data
 
 run = read_json("latest_run.json") or {}
 plan, agents = run.get("plan", {}), run.get("agents", {})
 health = read_json("health.json") or {}
 bt = read_json("backtest_latest.json") or {}
-
-c1, c2, c3, c4 = st.columns(4)
+ts = read_json("trade_summary_2y.json") or {}
+tl = read_csv("trades_2y.csv")
+RISK = ts.get("risk_per_trade_usd_illustrative") or S.account_equity * S.max_risk_pct / 100.0
+NOW = pd.Timestamp.now(tz=TZ)
 dec = plan.get("decision", "no run yet")
-c1.metric("Latest decision", dec)
-c2.metric("Data status", plan.get("data_status", "n/a"))
-c3.metric("Source", plan.get("data_source", "n/a"))
-c4.metric("As of", str(plan.get("timestamp", "n/a"))[:19])
-if plan.get("data_status") == "delayed":
-    st.warning("Data is labelled DELAYED/unverified (unofficial source). Verify prices on your broker before acting.")
 
-tabs = st.tabs(["Trade plan", "Charts", "Agents", "Backtests", "Paper performance", "Data sources & health", "Logs", "Trade log (2 years)"])
+# ------------------------------------------------------------------- header
+
+st.markdown('<div class="app-title">SPY Trading Assistant</div>'
+            '<div class="app-sub">Practice mode: fake money. It shows what the rules would do. It never places an order.</div>',
+            unsafe_allow_html=True)
+fresh_label, fresh_tone = P.freshness(plan, NOW)
+mkt = ("Market open", "good") if cal.is_open(NOW) else ("Market closed", "")
+st.markdown(chip("PRACTICE MODE", "blue") + chip(mkt[0], mkt[1]) + chip(fresh_label, fresh_tone)
+            + chip("Source: " + str(plan.get("data_source", "n/a")).replace("_", " ")), unsafe_allow_html=True)
+st.caption(NO_OPTIONS_MSG + " Trades are simulated with SPY shares.")
+if plan.get("data_status") == "delayed":
+    st.warning("The price data is delayed or from an unofficial source. Check prices with your broker before acting.")
+
+tabs = st.tabs(["Today", "Charts", "2-year results", "Reliability test", "Paper trades", "Agents", "Data & health", "Logs"])
+
+# -------------------------------------------------------------------- TODAY
 
 with tabs[0]:
+    v = P.decision_view(plan)
+    st.markdown(f'<div class="hero {esc(v["tone"] if v["tone"] in ("good", "bad") else "")}">'
+                f'<div class="eyebrow">What the rules say right now</div><div class="headline">{esc(v["headline"])}</div>'
+                f'<div class="sub">{esc(v["sub"])}</div></div>', unsafe_allow_html=True)
     if dec in ("CALL", "PUT"):
-        st.success(f"{dec}: {plan.get('decision_meaning')}")
-        st.warning(plan.get("evidence_warning") or "Evidence status: supported on underlying data only.")
-        st.write(f"**Execution basis:** {plan.get('execution_basis')}")
-        a, b, c = st.columns(3)
-        a.metric("Reference price", plan.get("underlying_reference_price"))
-        b.metric("Underlying stop", plan["stop_loss_invalidation"]["underlying_stop"])
-        c.metric("Max planned loss", f"${plan.get('max_planned_loss_usd')}")
-        a.metric("Target 1", plan.get("target_1"))
-        b.metric("Target 2", plan.get("target_2"))
-        c.metric("Time exit", plan.get("time_exit"))
-        st.json({k: plan.get(k) for k in ("strategy_label", "underlying_entry_trigger", "confirmation_requirements", "entry_rule",
-                                          "proposed_max_entry_price", "position_size", "estimated_transaction_costs_usd",
-                                          "reward_to_risk_t1", "reward_to_risk_blended", "supporting_evidence",
-                                          "contradictory_evidence", "reviewer_warnings", "cancel_conditions", "decision_expires",
-                                          "option_contract", "option_contract_note")})
+        if plan.get("evidence_warning"):
+            st.warning(P.plain_text(str(plan["evidence_warning"])))
+        stop = (plan.get("stop_loss_invalidation") or {}).get("underlying_stop")
+        kpi_row([("Price when it triggered", price(plan.get("underlying_reference_price")), "SPY", ""),
+                 ("Exit if it goes wrong", price(stop), "stop price", "bad"),
+                 ("First target", price(plan.get("target_1")), "take half the profit", "good"),
+                 ("Second target", price(plan.get("target_2")), "take the rest", "good")])
+        st.write("")
+        kpi_row([("Most you could lose", P.usd(float(plan["max_planned_loss_usd"]), sign=False) if plan.get("max_planned_loss_usd") is not None else "n/a",
+                  "if the stop is hit", ""),
+                 ("Get out by", str(plan.get("time_exit") or "n/a"), "latest exit time", ""),
+                 ("Size", str((plan.get("position_size") or {}).get("shares", "n/a")) if isinstance(plan.get("position_size"), dict) else "n/a",
+                  "SPY shares (simulated)", ""),
+                 ("Expires", str(plan.get("decision_expires") or "n/a")[:19], "after this the idea is stale", "")])
+        for title, key in (("Reasons for", "supporting_evidence"), ("Reasons against", "contradictory_evidence"),
+                           ("Warnings", "reviewer_warnings"), ("Cancel the idea if", "cancel_conditions")):
+            items = plan.get(key) or []
+            if items:
+                section(title)
+                for it in (items if isinstance(items, list) else [items]):
+                    st.write("- " + P.plain_text(str(it)))
+        with st.expander("Technical details"):
+            st.json({k: plan.get(k) for k in ("strategy_label", "underlying_entry_trigger", "entry_rule", "reward_to_risk_t1",
+                                              "reward_to_risk_blended", "estimated_transaction_costs_usd", "execution_basis",
+                                              "option_contract", "option_contract_note")})
     else:
-        st.info("NO TRADE is a normal and frequent outcome.")
-        for f in plan.get("failed_requirements", []):
-            st.write(f"- **{f['requirement']}**: {f['detail']}")
-        if plan.get("setups_forming"):
-            st.write("Setups forming:")
-            for f in plan["setups_forming"]:
-                st.write(f"- {f['strategy']}: {f['text']}")
-        if plan.get("re_evaluate_when"):
-            st.caption("Next evaluation: " + plan["re_evaluate_when"])
+        left, right = st.columns(2)
+        with left:
+            section("Why not?", "Everything below must be true before the rules will suggest a trade.")
+            fr = plan.get("failed_requirements") or []
+            if fr:
+                for f in fr:
+                    st.write("✗ " + P.plain_requirement(f))
+            else:
+                st.write("No reason recorded yet.")
+        with right:
+            section("Getting close", "Ideas that are forming but have not triggered. They are not trade signals.")
+            sf = plan.get("setups_forming") or []
+            if sf:
+                for f in sf:
+                    st.markdown(f"**{esc(P.strategy_name(f.get('strategy', '')))}**  \n{esc(P.plain_text(str(f.get('text', ''))))}")
+            else:
+                st.write("Nothing is close to triggering.")
+    st.caption("Next check: " + P.next_check_text(NOW) + ".")
     if plan.get("agent_disagreements"):
-        st.subheader("Agent disagreements")
+        section("Where the checkers disagreed")
         for d in plan["agent_disagreements"]:
-            st.write("- " + d)
-    st.subheader("Option chain")
-    st.write(agents.get("options_contract_analyst", {}).get("findings", {}).get("message", NO_OPTIONS_MSG))
+            st.write("- " + P.plain_text(str(d)))
+    pt0 = read_csv("paper_trades.csv")
+    open0 = read_json("open_positions.json") or []
+    section("Practice account at a glance")
+    kpi_row([("Open practice trades", str(len(open0)), "right now", ""),
+             ("Closed practice trades", str(len(pt0)), "so far (aim for 100+)", ""),
+             ("Practice result", P.usd(pt0.pnl_usd.sum()) if len(pt0) and "pnl_usd" in pt0 else "$0", "fake money",
+              money_tone(pt0.pnl_usd.sum()) if len(pt0) and "pnl_usd" in pt0 else "")])
+
+# ------------------------------------------------------------------- CHARTS
 
 with tabs[1]:
     df, src, err = live_bars()
     if err:
-        st.warning(f"Live fetch problem: {err}")
+        st.warning("Could not get the newest prices, so this shows saved history. " + str(err)[:160])
     if len(df) < 120:
-        st.info("Not enough bars to draw charts yet. Run the ingest job first.")
+        st.info("Not enough price history to draw charts yet. Run the 'Daily ingest and backtest' job on GitHub first.")
     else:
-        days = st.slider("Days shown on the 5-minute chart", 1, 5, 2)
+        section("5-minute chart", "Each candle is 5 minutes. Green = price rose, red = price fell.")
+        days = st.slider("Days shown", 1, 5, 2)
         f = add_features(df)
         last_days = sorted(set(f.date))[-days:]
-        v = f[f.date.isin(last_days)]
-        lv = [(plan.get("stop_loss_invalidation", {}).get("underlying_stop"), "stop"), (plan.get("target_1"), "T1"), (plan.get("target_2"), "T2")] \
-            if dec in ("CALL", "PUT") else []
+        vw = f[f.date.isin(last_days)]
+        lv = [(plan.get("stop_loss_invalidation", {}).get("underlying_stop"), "exit if wrong"), (plan.get("target_1"), "target 1"),
+              (plan.get("target_2"), "target 2")] if dec in ("CALL", "PUT") else []
         lr = f.iloc[-1]
-        lv += [(None if pd.isna(lr.pdh) else float(lr.pdh), "prior-day high"), (None if pd.isna(lr.pdl) else float(lr.pdl), "prior-day low")]
-        st.plotly_chart(candles(v, f"{S.symbol} 5-minute ({src})", [("vwap", "VWAP"), ("ema9", "EMA 9"), ("ema21", "EMA 21")],
-                                [("or_high", "Opening range high"), ("or_low", "Opening range low")], lv), use_container_width=True)
+        lv += [(None if pd.isna(lr.pdh) else float(lr.pdh), "yesterday's high"), (None if pd.isna(lr.pdl) else float(lr.pdl), "yesterday's low")]
+        st.plotly_chart(candles(vw, f"SPY, 5-minute candles ({src})", [("vwap", "Day's average price (VWAP)"), ("ema9", "Fast average"), ("ema21", "Slow average")],
+                                [("or_high", "Morning range top"), ("or_low", "Morning range bottom")], lv), use_container_width=True)
         h = make_hourly(df)
         hb = df.resample("60min", offset="30min", closed="left", label="left").agg(
             {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).dropna(subset=["close"])
         hb = hb.join(h[["h_ema20"]])
         hb = hb[hb.index.date >= sorted(set(hb.index.date))[-min(15, len(set(hb.index.date)))]]
-        st.plotly_chart(candles(hb, f"{S.symbol} 1-hour (built from 5-minute bars)", [("h_ema20", "EMA 20")], rsi=False), use_container_width=True)
+        section("1-hour chart", "The bigger picture. The rules only take trades that agree with this trend.")
+        st.plotly_chart(candles(hb, "SPY, 1-hour candles (built from the 5-minute data)", [("h_ema20", "Hourly trend line")], rsi=False),
+                        use_container_width=True)
         r = agents.get("market_regime_analyst", {}).get("findings", {})
         if r:
-            st.write(f"**Regime:** {r.get('classification')} | structure: {r.get('structure_1h')} | ADX {r.get('adx_5m')} | "
-                     f"volatility: {r.get('volatility')} | suitable: {', '.join(r.get('suitable_strategies', [])) or 'none'}")
-            st.json(r.get("levels", {}))
-        vx = agents.get("volatility_event_analyst", {}).get("findings", {}).get("vix")
-        st.write("**VIX (Yahoo, unofficial):** " + (json.dumps(vx) if vx else "unavailable"))
+            suit = ", ".join(P.strategy_name(x) for x in r.get("suitable_strategies", [])) or "none"
+            st.write(f"**Market type:** {P.REGIMES.get(r.get('classification'), r.get('classification'))}  ·  "
+                     f"**Best-suited rule sets right now:** {suit}")
+        with st.expander("What are these lines?"):
+            st.markdown("- **Day's average price (VWAP):** the average price paid today, weighted by volume.\n"
+                        "- **Fast / slow average:** smoothed price lines. When price pulls back to the slow line in an uptrend, that can be a buying chance.\n"
+                        "- **Morning range:** the high and low of the first 30 minutes of trading.\n"
+                        "- **Momentum (RSI):** below 30 means price fell fast, above 70 means it rose fast.")
+
+# ------------------------------------------------------------- 2-YEAR RESULTS
 
 with tabs[2]:
-    if not agents:
-        st.info("No agent run recorded yet.")
-    for name, a in agents.items():
-        with st.expander(f"{name}  ->  {a['recommendation']}" + (f"   [ERROR: {a['error']}]" if a.get("error") else "")):
-            st.write(f"Confidence interpretation: {a['confidence']}")
-            if a["missing_data"]:
-                st.write("Missing data: " + "; ".join(a["missing_data"]))
-            if a["risk_concerns"]:
-                st.write("Risk concerns: " + "; ".join(map(str, a["risk_concerns"])))
-            if a["contradictory_evidence"]:
-                st.write("Contradictory evidence: " + "; ".join(a["contradictory_evidence"]))
-            st.json(a["findings"])
+    if not ts or not ts.get("strategies"):
+        st.info("No results yet. Run the 'Daily ingest and backtest' job on GitHub (it needs at least about 5 days of saved data).")
+    else:
+        w = ts.get("window", {})
+        st.markdown(f"**What would have happened** if you had followed each set of rules from **{esc(w.get('first', '?'))}** to "
+                    f"**{esc(w.get('last', '?'))}**, risking **{esc(P.usd(RISK, sign=False))}** on every trade "
+                    f"(0.5% of a $25,000 practice account)?")
+        st.info("This replays fixed rules over the whole 2 years. It is not a prediction, and it can look better than live trading would. "
+                "The 'Reliability test' tab has the fairer check. SPY shares only.")
+        sb = P.scoreboard(ts, bt, RISK)
+        cols = st.columns(3)
+        for i, row in sb.iterrows():
+            key = row["_key"]
+            tone = "good" if row["Total result ($)"] > 0 else ("bad" if row["Total result ($)"] < 0 else "")
+            cols[i % 3].markdown(
+                f'<div class="card"><div class="t">{esc(row["Strategy"])}</div><div class="b">{esc(P.strategy_blurb(key))}</div>'
+                f'<div class="big {tone}">{esc(P.usd(row["Total result ($)"]))}</div><div class="n">total result over 2 years</div>'
+                f'<div class="bar"><div style="width:{max(0, min(100, row["Win rate"])):.0f}%"></div></div>'
+                f'<div class="n"><b>{int(row["Wins"])}</b> wins · <b>{int(row["Losses"])}</b> losses · {row["Win rate"]:.0f}% win rate</div>'
+                f'<div class="n">Average win {esc(P.usd(row["Average win ($)"]))} · average loss {esc(P.usd(row["Average loss ($)"]))}</div>'
+                f'<div class="n">Worst losing stretch {esc(P.usd(row["Worst losing stretch ($)"]))}</div>'
+                f'<div style="margin-top:8px">{chip("Fair test: " + row["Fair test"], row["_tone"])}</div></div>',
+                unsafe_allow_html=True)
+        with st.expander("See the full scoreboard as a table"):
+            show = sb.drop(columns=["_key", "_tone"])
+            st.dataframe(show, use_container_width=True, hide_index=True, column_config={
+                "Win rate": st.column_config.ProgressColumn("Win rate", min_value=0, max_value=100, format="%.0f%%"),
+                "Average win ($)": st.column_config.NumberColumn(format="$%.0f"),
+                "Average loss ($)": st.column_config.NumberColumn(format="$%.0f"),
+                "Average per trade ($)": st.column_config.NumberColumn(format="$%.2f"),
+                "Total result ($)": st.column_config.NumberColumn(format="$%.0f"),
+                "Worst losing stretch ($)": st.column_config.NumberColumn(format="$%.0f")})
+        ec = P.equity_curves(tl)
+        if len(ec):
+            section("Running total over time", "Each line is the profit or loss so far if you had followed that rule set. Rising is good.")
+            fig = go.Figure()
+            for c in ec.columns:
+                fig.add_trace(go.Scatter(x=ec.index, y=ec[c], name=c, mode="lines", line=dict(width=2)))
+            fig.add_hline(y=0, line_width=1, line_dash="dot")
+            fig.update_layout(yaxis_title="Profit or loss so far ($)")
+            st.plotly_chart(style(fig, 420), use_container_width=True)
+
+        section("Look closer at one rule set", "When and how did it win or lose?")
+        keys = list(sb["_key"])
+        pick = st.selectbox("Rule set", keys, format_func=P.strategy_name, key="tl_pick")
+        sel = ts["strategies"][pick]
+        st.caption(P.strategy_blurb(pick))
+        cfg = {"Win rate": st.column_config.ProgressColumn("Win rate", min_value=0, max_value=100, format="%.0f%%"),
+               "Total ($)": st.column_config.NumberColumn(format="$%.0f"),
+               "Average per trade ($)": st.column_config.NumberColumn(format="$%.2f")}
+        c1, c2 = st.columns(2)
+        for box, kind, title, noun in ((c1, "direction", "Buying vs selling", "direction"), (c2, "regime", "Type of market", "market type"),
+                                       (c1, "tod_bucket", "Time of day", "time slot")):
+            data = sel["by"].get(kind, {})
+            if data:
+                ct = P.condition_table(data, kind, RISK)
+                with box:
+                    st.markdown(f"**{title}**")
+                    st.dataframe(ct.drop(columns=["_k"]), use_container_width=True, hide_index=True, column_config=cfg)
+                    st.caption(P.best_worst(ct, noun))
+        mo = sel["by"].get("month", {})
+        if mo:
+            mt = P.condition_table(mo, "month", RISK)
+            with c2:
+                st.markdown("**Month by month**")
+                fig = go.Figure(go.Bar(x=mt["Group"], y=mt["Total ($)"], marker_color=[GREEN if x >= 0 else RED for x in mt["Total ($)"]]))
+                fig.update_layout(yaxis_title="Result ($)", showlegend=False)
+                st.plotly_chart(style(fig, 280), use_container_width=True)
+                st.caption("Green months made money, red months lost money.")
+        if len(tl):
+            section("Every trade", "One row per trade. A win means it made money after costs.")
+            show_what = st.radio("Show", ["All trades", "Wins only", "Losses only"], horizontal=True, key="tl_res")
+            mine = tl[tl.strategy == pick]
+            if show_what == "Wins only":
+                mine = mine[mine.result == "WIN"]
+            elif show_what == "Losses only":
+                mine = mine[mine.result == "LOSS"]
+            tv = P.trades_view(mine)
+            st.dataframe(tv, use_container_width=True, hide_index=True, height=420,
+                         column_config={"Result ($)": st.column_config.NumberColumn(format="$%.0f")})
+            st.download_button("Download every trade (spreadsheet)", tl.to_csv(index=False), "trades_2y.csv", "text/csv")
+
+# ---------------------------------------------------------- RELIABILITY TEST
 
 with tabs[3]:
     if "strategies" not in bt:
-        st.info("No backtest report yet (it needs about 5 days of stored bars; the daily job creates it).")
+        st.info("No reliability test yet. The daily job on GitHub creates it once about 5 days of data are saved.")
     else:
-        st.warning(bt["report_type"])
-        st.error("Options profitability research: " + bt["options_profitability_research"]["status"] + ". "
-                 + bt["options_profitability_research"]["reason"])
-        for w in bt.get("warnings", []):
-            st.warning(w)
-        rows = []
-        for n, r in bt["strategies"].items():
-            o = r["out_of_sample_reported_once"]
-            rows.append({"strategy": n, "OOS trades": o.get("trades", 0), "OOS net exp (R)": o.get("net_expectancy_R"),
-                         "CI low": o.get("ci_low"), "CI high": o.get("ci_high"), "verdict": r["verdict"]})
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
-        st.caption(f"Data: {bt['data']['first'][:10]} to {bt['data']['last'][:10]} ({bt['data']['trading_days']} days). "
-                   f"Configurations tested: {bt['multiple_testing']['configurations_evaluated']}. "
-                   f"Baseline OOS: {bt['baseline_hourly_trend']['out_of_sample'].get('net_expectancy_R')}R")
-        pick = st.selectbox("Strategy detail", list(bt["strategies"]))
-        st.json(bt["strategies"][pick])
-        st.write("Limitations: " + " ".join(bt["limitations"]))
+        d = bt.get("data", {})
+        oos = (d.get("splits_days") or {}).get("oos")
+        st.markdown("**Is any of this reliable?** The system tests each rule set on the **most recent slice of the data** "
+                    "(about " + esc(oos if oos else "a quarter of the") + " trading days) that it never used when choosing the settings. "
+                    "That is closer to how the rules would behave on brand-new days.")
+        rt = P.reliability_table(bt, RISK)
+        st.dataframe(rt, use_container_width=True, hide_index=True, column_config={
+            "Average per trade ($)": st.column_config.NumberColumn(format="$%.2f"),
+            "Plausible range, low ($)": st.column_config.NumberColumn(format="$%.2f"),
+            "Plausible range, high ($)": st.column_config.NumberColumn(format="$%.2f")})
+        st.caption("Plausible range: where the true average per trade probably lies. If it includes $0, the result could be luck.")
+        base = (bt.get("baseline_hourly_trend") or {}).get("out_of_sample", {})
+        if base.get("trades"):
+            st.write(f"**Yardstick:** the simple 1-hour trend rule averaged {P.usd(P.r_to_usd(base.get('net_expectancy_R'), RISK), decimals=2)} "
+                     f"per trade over {base['trades']} trades. A rule set should beat this before it is worth the extra complexity.")
+        section("What the verdicts mean")
+        for code in ("UNDERLYING_EDGE_SUPPORTED", "NOT_DEMONSTRATED", "INSUFFICIENT_SAMPLE", "FAILED_OOS"):
+            lab, tone, expl = P.verdict_info(code)
+            st.markdown(chip(lab, tone) + " " + esc(expl), unsafe_allow_html=True)
+        opt = bt.get("options_profitability_research", {})
+        st.info("**Option profits: " + str(opt.get("status", "UNAVAILABLE")).lower() + ".** " + str(opt.get("reason", "")))
+        for wmsg in bt.get("warnings", []):
+            st.warning(wmsg)
+        st.caption(f"Data used: {str(d.get('first', ''))[:10]} to {str(d.get('last', ''))[:10]} ({d.get('trading_days', '?')} trading days). "
+                   f"{bt.get('multiple_testing', {}).get('configurations_evaluated', '?')} settings were tried, and the statistics are adjusted for that.")
+        with st.expander("Limitations to keep in mind"):
+            for lim in bt.get("limitations", []):
+                st.write("- " + lim)
+        with st.expander("Technical details for one rule set"):
+            p2 = st.selectbox("Rule set", list(bt["strategies"]), format_func=P.strategy_name, key="bt_pick")
+            st.json(bt["strategies"][p2])
+
+# ------------------------------------------------------------- PAPER TRADES
 
 with tabs[4]:
     pt = read_csv("paper_trades.csv")
-    st.caption("SIMULATED SPY share trades, not option fills. Win rate alone says little; look at expectancy and sample size.")
+    st.caption("Practice trades with fake money, using SPY shares (not options). These are the best check of the rules, because they happen on new days.")
     open_pos = read_json("open_positions.json") or []
-    st.write(f"Open simulated positions: {len(open_pos)}")
+    if open_pos:
+        section("Open right now")
+        st.dataframe(pd.DataFrame(open_pos), use_container_width=True, hide_index=True)
     if len(pt) == 0:
-        st.info("No closed paper trades yet.")
+        st.info("No practice trades have finished yet. The system only trades when every requirement is met, so this can take days or weeks. "
+                "Aim for at least 100 before drawing any conclusion.")
     else:
-        pt["cum_R"] = pt.net_R.cumsum()
-        a, b, c, d = st.columns(4)
-        a.metric("Closed trades", len(pt))
-        b.metric("Win rate", f"{(pt.net_R > 0).mean():.0%}")
-        c.metric("Expectancy (R)", f"{pt.net_R.mean():.2f}")
-        d.metric("Total P&L (sim $)", f"{pt.pnl_usd.sum():,.0f}")
+        wins = int((pt.net_R > 0).sum())
+        pnl = pt.pnl_usd if "pnl_usd" in pt else pt.net_R * RISK
+        kpi_row([("Finished trades", str(len(pt)), "aim for 100+", ""),
+                 ("Wins", f"{wins} of {len(pt)}", f"{wins / len(pt):.0%} win rate", ""),
+                 ("Average per trade", P.usd(pnl.mean(), decimals=2), "after costs", money_tone(pnl.mean())),
+                 ("Total result", P.usd(pnl.sum()), "fake money", money_tone(pnl.sum()))])
         if len(pt) < 30:
-            st.warning("Fewer than 30 closed trades: too few to conclude anything.")
-        st.line_chart(pt.set_index(pd.RangeIndex(len(pt)))["cum_R"])
-        st.dataframe(pt.tail(100), use_container_width=True)
+            st.warning("Fewer than 30 finished trades: far too few to conclude anything.")
+        fig = go.Figure(go.Scatter(x=list(range(1, len(pt) + 1)), y=pnl.cumsum(), mode="lines", line=dict(width=2.2)))
+        fig.update_layout(xaxis_title="Trade number", yaxis_title="Running total ($)")
+        st.plotly_chart(style(fig, 320), use_container_width=True)
+        st.dataframe(pt.tail(100), use_container_width=True, hide_index=True)
     perf = agents.get("performance_adaptation_analyst", {}).get("findings", {})
     if perf:
-        st.json(perf)
+        with st.expander("Technical details"):
+            st.json(perf)
+
+# ------------------------------------------------------------------- AGENTS
 
 with tabs[5]:
-    st.subheader("Verified data-source capabilities and cost")
-    st.dataframe(pd.DataFrame([c.__dict__ for c in REGISTRY]), use_container_width=True)
-    v = cost_violations(S)
-    st.success("$0 data budget: no violations") if not v else st.error("Budget violations: " + "; ".join(v))
-    st.subheader("Ingest health")
-    st.json(health)
-    dq = agents.get("data_quality_monitor", {}).get("findings", {})
-    if dq:
-        st.subheader("Latest data-quality check")
-        st.json(dq)
+    st.caption("Eleven small checkers each look at one part of the picture. A separate risk checker can say no. None of them places an order.")
+    if not agents:
+        st.info("No checker results recorded yet.")
+    for name, a in agents.items():
+        rec = str(a.get("recommendation", ""))
+        tone = ("good" if rec in ("OK", "APPROVE", "NO_OBJECTION", "CONTRACT_FOUND") else
+                ("bad" if rec in ("REJECT", "VETO", "NO_DATA", "DISABLE_SIGNALS", "BLACKOUT", "NO_CONTRACT") else
+                 ("warn" if rec == "CAUTION" else "")))
+        with st.expander(f"{name.replace('_', ' ').title()}  -  {rec}" + (f"   (problem: {a['error']})" if a.get("error") else "")):
+            st.markdown(chip(rec, tone) + chip("confidence: " + str(a.get("confidence", "n/a"))), unsafe_allow_html=True)
+            for lab, key in (("Missing data", "missing_data"), ("Risk concerns", "risk_concerns"), ("Evidence against", "contradictory_evidence")):
+                if a.get(key):
+                    st.write(f"**{lab}:** " + "; ".join(P.plain_text(str(x)) for x in a[key]))
+            st.caption("Technical details")
+            st.json(a.get("findings", {}))
+
+# ------------------------------------------------------------ DATA & HEALTH
 
 with tabs[6]:
-    st.subheader("Alerts (simulated, not orders)")
-    st.dataframe(pd.DataFrame(read_jsonl("alerts.jsonl", 100)).iloc[::-1] if read_jsonl("alerts.jsonl", 1) else pd.DataFrame(),
-                 use_container_width=True)
-    st.subheader("Decision log (today)")
-    today = str(pd.Timestamp.now(tz=TZ).date())
-    rows = read_jsonl(f"runs/{today}.jsonl", 300)
-    st.dataframe(pd.DataFrame(rows).iloc[::-1] if rows else pd.DataFrame(), use_container_width=True)
+    viol = cost_violations(S)
+    kpi_row([("Data source", str(health.get("source", plan.get("data_source", "n/a"))).replace("_", " "), "where prices come from", ""),
+             ("Days saved", str(health.get("history_days", "n/a")), "trading days of 5-minute data", ""),
+             ("Data check", str(health.get("quality", "n/a")), "OK means no gaps found", "good" if health.get("quality") == "OK" else ""),
+             ("Data cost", "$0" if not viol else "Over budget", "free sources only", "good" if not viol else "bad")])
+    if health.get("warning"):
+        st.warning(health["warning"])
+    if viol:
+        st.error("Budget problem: " + "; ".join(viol))
+    section("Where the data can come from", "Free sources only. Real-time option quotes cost money, so they are switched off.")
+    st.dataframe(pd.DataFrame([c.__dict__ for c in REGISTRY]), use_container_width=True, hide_index=True)
+    with st.expander("Technical details: last download and data check"):
+        st.json(health)
+        dq = agents.get("data_quality_monitor", {}).get("findings", {})
+        if dq:
+            st.json(dq)
 
-if st.sidebar.checkbox("Auto-refresh every 60 s", value=False):
-    time.sleep(60)
-    st.rerun()
-st.sidebar.caption("Control: create a file named KILL_SWITCH in the state branch (or set SPXAI_KILL=1) to pause all signals.")
-
+# --------------------------------------------------------------------- LOGS
 
 with tabs[7]:
-    ts = read_json("trade_summary_2y.json")
-    tl = read_csv("trades_2y.csv")
-    if not ts or "strategies" not in ts or not ts["strategies"]:
-        st.info("No trade log yet. Run the 'Daily ingest and backtest' job on GitHub (it needs at least ~5 days of stored bars).")
-    else:
-        w = ts.get("window", {})
-        st.warning(f"Replay of the fixed default rules on {w.get('first', '?')} to {w.get('last', '?')}. "
-                   "SPY shares only. A WIN means the net result after costs was above zero. "
-                   "This is NOT an out-of-sample test and not a prediction; the Backtests tab holds the fairer test.")
-        st.caption(f"Dollar figures assume a fixed ${ts['risk_per_trade_usd_illustrative']:,.0f} risk per trade (1R), no compounding. "
-                   "Illustration only.")
-        rows = []
-        for n, r in ts["strategies"].items():
-            rows.append({"strategy": n, "trades": r["trades"], "wins": r["wins"], "losses": r["losses"],
-                         "win rate": r["win_rate"], "avg win (R)": r["avg_win_R"], "avg loss (R)": r["avg_loss_R"],
-                         "net total (R)": r["total_net_R"], "avg per trade (R)": r["net_exp_R"],
-                         "illustrative $": r["total_pnl_usd_illustrative"], "worst drop (R)": r["max_drawdown_R"]})
-        st.subheader("Wins and losses by strategy")
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
-        pick2 = st.selectbox("See the conditions for", list(ts["strategies"]), key="tl_pick")
-        sel = ts["strategies"][pick2]
-        labels = {"direction": "By direction (long = buy, short = sell)", "regime": "By market regime",
-                  "tod_bucket": "By time of day", "trigger": "By entry trigger", "month": "By month"}
-        for col, title in labels.items():
-            data = sel["by"].get(col, {})
-            if data:
-                st.markdown("**" + title + "**")
-                st.dataframe(pd.DataFrame(data).T[["trades", "wins", "losses", "win_rate", "total_net_R", "net_exp_R"]],
-                             use_container_width=True)
-        if len(tl):
-            st.subheader("Every trade")
-            mine = tl[tl.strategy == pick2]
-            res = st.multiselect("Show", ["WIN", "LOSS", "FLAT"], default=["WIN", "LOSS", "FLAT"], key="tl_res")
-            mine = mine[mine.result.isin(res)]
-            st.dataframe(mine.drop(columns=["strategy"]), use_container_width=True, height=420)
-            st.download_button("Download all trades (CSV)", tl.to_csv(index=False), "trades_2y.csv", "text/csv")
+    section("Alerts", "Messages the system generated. They are notes, not orders.")
+    al = read_jsonl("alerts.jsonl", 100)
+    st.dataframe(pd.DataFrame(al).iloc[::-1] if al else pd.DataFrame(), use_container_width=True, hide_index=True)
+    section("Every check made today")
+    today = str(pd.Timestamp.now(tz=TZ).date())
+    rows = read_jsonl(f"runs/{today}.jsonl", 300)
+    st.dataframe(pd.DataFrame(rows).iloc[::-1] if rows else pd.DataFrame(), use_container_width=True, hide_index=True)
 
+# ------------------------------------------------------------------ SIDEBAR
+
+st.sidebar.markdown("### How to read the numbers")
+for term, text in P.GLOSSARY:
+    st.sidebar.markdown(f"**{term}**  \n{text.format(risk=P.usd(RISK, sign=False))}")
+st.sidebar.markdown("---")
+st.sidebar.caption("Pause everything: create a file named KILL_SWITCH on the data branch (or set SPXAI_KILL=1).")
+st.sidebar.caption("Practice mode only. Not financial advice. Past results do not predict future results.")
+if st.sidebar.checkbox("Refresh this page every 60 seconds", value=False):
+    time.sleep(60)
+    st.rerun()
