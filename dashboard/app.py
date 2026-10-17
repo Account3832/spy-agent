@@ -151,7 +151,7 @@ c4.metric("As of", str(plan.get("timestamp", "n/a"))[:19])
 if plan.get("data_status") == "delayed":
     st.warning("Data is labelled DELAYED/unverified (unofficial source). Verify prices on your broker before acting.")
 
-tabs = st.tabs(["Trade plan", "Charts", "Agents", "Backtests", "Paper performance", "Data sources & health", "Logs"])
+tabs = st.tabs(["Trade plan", "Charts", "Agents", "Backtests", "Paper performance", "Data sources & health", "Logs", "Trade log (2 years)"])
 
 with tabs[0]:
     if dec in ("CALL", "PUT"):
@@ -301,3 +301,43 @@ if st.sidebar.checkbox("Auto-refresh every 60 s", value=False):
     time.sleep(60)
     st.rerun()
 st.sidebar.caption("Control: create a file named KILL_SWITCH in the state branch (or set SPXAI_KILL=1) to pause all signals.")
+
+
+with tabs[7]:
+    ts = read_json("trade_summary_2y.json")
+    tl = read_csv("trades_2y.csv")
+    if not ts or "strategies" not in ts or not ts["strategies"]:
+        st.info("No trade log yet. Run the 'Daily ingest and backtest' job on GitHub (it needs at least ~5 days of stored bars).")
+    else:
+        w = ts.get("window", {})
+        st.warning(f"Replay of the fixed default rules on {w.get('first', '?')} to {w.get('last', '?')}. "
+                   "SPY shares only. A WIN means the net result after costs was above zero. "
+                   "This is NOT an out-of-sample test and not a prediction; the Backtests tab holds the fairer test.")
+        st.caption(f"Dollar figures assume a fixed ${ts['risk_per_trade_usd_illustrative']:,.0f} risk per trade (1R), no compounding. "
+                   "Illustration only.")
+        rows = []
+        for n, r in ts["strategies"].items():
+            rows.append({"strategy": n, "trades": r["trades"], "wins": r["wins"], "losses": r["losses"],
+                         "win rate": r["win_rate"], "avg win (R)": r["avg_win_R"], "avg loss (R)": r["avg_loss_R"],
+                         "net total (R)": r["total_net_R"], "avg per trade (R)": r["net_exp_R"],
+                         "illustrative $": r["total_pnl_usd_illustrative"], "worst drop (R)": r["max_drawdown_R"]})
+        st.subheader("Wins and losses by strategy")
+        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        pick2 = st.selectbox("See the conditions for", list(ts["strategies"]), key="tl_pick")
+        sel = ts["strategies"][pick2]
+        labels = {"direction": "By direction (long = buy, short = sell)", "regime": "By market regime",
+                  "tod_bucket": "By time of day", "trigger": "By entry trigger", "month": "By month"}
+        for col, title in labels.items():
+            data = sel["by"].get(col, {})
+            if data:
+                st.markdown("**" + title + "**")
+                st.dataframe(pd.DataFrame(data).T[["trades", "wins", "losses", "win_rate", "total_net_R", "net_exp_R"]],
+                             use_container_width=True)
+        if len(tl):
+            st.subheader("Every trade")
+            mine = tl[tl.strategy == pick2]
+            res = st.multiselect("Show", ["WIN", "LOSS", "FLAT"], default=["WIN", "LOSS", "FLAT"], key="tl_res")
+            mine = mine[mine.result.isin(res)]
+            st.dataframe(mine.drop(columns=["strategy"]), use_container_width=True, height=420)
+            st.download_button("Download all trades (CSV)", tl.to_csv(index=False), "trades_2y.csv", "text/csv")
+
