@@ -31,6 +31,7 @@ from spxai import present as P
 from spxai.config import TZ, load_settings, state_dir
 from spxai.features import add_features, make_hourly
 from spxai.providers import NO_OPTIONS_MSG, REGISTRY, cost_violations, get_intraday
+from spxai.strategies import REGISTRY as STRATS
 
 S = load_settings()
 st.set_page_config(page_title="SPY Trading Assistant", page_icon="📈", layout="wide")
@@ -213,6 +214,72 @@ def candles(df, title, ema_cols, extra_lines=None, levels=None, rsi=True):
     return style(fig, 600)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def stored_bars():
+    """All saved 5-minute bars (about 5 years), used to draw past trades. Empty frame if unavailable."""
+    try:
+        if URL:
+            import requests
+            r = requests.get(f"{URL}/bars/{S.symbol}_5m.csv.gz", headers=_headers(), timeout=60)
+            r.raise_for_status()
+            try:
+                df = pd.read_csv(io.BytesIO(r.content), index_col=0, compression="gzip")
+            except Exception:  # noqa: BLE001  already decompressed in transit
+                df = pd.read_csv(io.BytesIO(r.content), index_col=0)
+        else:
+            from spxai.store import load_bars
+            df = load_bars(S.symbol, "5m")
+        df.index = pd.DatetimeIndex(pd.to_datetime(df.index, utc=True)).tz_convert(TZ)
+        return df
+    except Exception:  # noqa: BLE001
+        return pd.DataFrame()
+
+
+def trade_chart(tr, heading):
+    """Candles for the trade's day with entry, stop, targets and exit drawn on. Returns None if the day's prices are unavailable."""
+    bars = stored_bars()
+    live, _, _ = live_bars()
+    if len(live):
+        bars = pd.concat([bars, live]) if len(bars) else live
+        bars = bars[~bars.index.duplicated(keep="last")].sort_index()
+    if bars is None or len(bars) == 0:
+        return None
+    day = pd.Timestamp(tr["date"]).date()
+    lo = pd.Timestamp(day, tz=TZ) - pd.Timedelta(days=14)
+    hi = pd.Timestamp(day, tz=TZ) + pd.Timedelta(days=1)
+    seg = bars[(bars.index >= lo) & (bars.index < hi)]
+    if not (seg.index.date == day).any():
+        return None
+    f = add_features(seg)
+    v = f[f.date == day]
+    fig = candles(v, heading, [("vwap", "Day's average price (VWAP)"), ("ema9", "Fast average"), ("ema21", "Slow average")],
+                  [("or_high", "Morning range top"), ("or_low", "Morning range bottom")], None, rsi=False)
+    k = 1 if tr["direction"] == "LONG" else -1
+    entry, stop, t1, t2, ex = (float(tr[x]) for x in ("entry", "stop_price", "target1_price", "target2_price", "exit_price"))
+    et = pd.Timestamp(tr["entry_time"]).tz_convert(TZ).tz_localize(None)
+    xt = pd.Timestamp(tr["exit_time"]).tz_convert(TZ).tz_localize(None) + pd.Timedelta(minutes=2.5)
+    x1 = max(xt, et + pd.Timedelta(minutes=5))
+    fig.add_shape(type="rect", x0=et, x1=x1, y0=entry, y1=t2, fillcolor="rgba(22,163,74,0.13)", line_width=0, layer="below")
+    fig.add_shape(type="rect", x0=et, x1=x1, y0=entry, y1=stop, fillcolor="rgba(220,38,38,0.13)", line_width=0, layer="below")
+    for y, lab, col, dash in ((entry, "Entry", BLUE, "solid"), (stop, "Stop (exit if wrong)", RED, "dash"),
+                              (t1, "Target 1", GREEN, "dash"), (t2, "Target 2", GREEN, "dot")):
+        fig.add_shape(type="line", x0=et, x1=x1, y0=y, y1=y, line=dict(color=col, width=1.6, dash=dash))
+        fig.add_annotation(x=x1, y=y, text=f"{lab} {y:,.2f}", showarrow=False, xanchor="left", font=dict(size=11, color=col))
+    win = tr["result"] == "WIN"
+    fig.add_trace(go.Scatter(x=[et], y=[entry], mode="markers+text", name="Got in", text=["Got in"],
+                             textposition="top center" if k == 1 else "bottom center",
+                             marker=dict(symbol="triangle-up" if k == 1 else "triangle-down", size=16, color=BLUE,
+                                         line=dict(width=1, color="white"))))
+    fig.add_trace(go.Scatter(x=[xt], y=[ex], mode="markers+text", name="Got out",
+                             text=["Got out: " + ("win" if win else ("loss" if tr["result"] == "LOSS" else "even"))],
+                             textposition="bottom center" if k == 1 else "top center",
+                             marker=dict(symbol="x", size=14, color=GREEN if win else RED, line=dict(width=2, color=GREEN if win else RED))))
+    ys = [float(v.low.min()), float(v.high.max()), stop, t2]
+    pad = (max(ys) - min(ys)) * 0.06
+    fig.update_yaxes(range=[min(ys) - pad, max(ys) + pad])
+    return fig
+
+
 # --------------------------------------------------------------------- data
 
 run = read_json("latest_run.json") or {}
@@ -355,7 +422,7 @@ with tabs[2]:
                     f"(0.5% of a $25,000 practice account)?")
         st.info("This replays fixed rules over the whole 2 years. It is not a prediction, and it can look better than live trading would. "
                 "The 'Reliability test' tab has the fairer check. SPY shares only.")
-        sb = P.scoreboard(ts, bt, RISK)
+        sb = P.scoreboard(ts, bt, RISK, live=S.enabled_strategies)
         cols = st.columns(3)
         for i, row in sb.iterrows():
             key = row["_key"]
@@ -367,8 +434,12 @@ with tabs[2]:
                 f'<div class="n"><b>{int(row["Wins"])}</b> wins · <b>{int(row["Losses"])}</b> losses · {row["Win rate"]:.0f}% win rate</div>'
                 f'<div class="n">Average win {esc(P.usd(row["Average win ($)"]))} · average loss {esc(P.usd(row["Average loss ($)"]))}</div>'
                 f'<div class="n">Worst losing stretch {esc(P.usd(row["Worst losing stretch ($)"]))}</div>'
-                f'<div style="margin-top:8px">{chip("Fair test: " + row["Fair test"], row["_tone"])}</div></div>',
+                f'<div style="margin-top:8px">{chip("Fair test: " + row["Fair test"], row["_tone"])}'
+                f'{chip(row["Status"], "blue" if row["Status"] == "Live practice" else "")}</div></div>',
                 unsafe_allow_html=True)
+        lesson = P.win_rate_lesson(sb)
+        if lesson:
+            st.info(lesson)
         with st.expander("See the full scoreboard as a table"):
             show = sb.drop(columns=["_key", "_tone"])
             st.dataframe(show, use_container_width=True, hide_index=True, column_config={
@@ -427,6 +498,22 @@ with tabs[2]:
             st.dataframe(tv, use_container_width=True, hide_index=True, height=420,
                          column_config={"Result ($)": st.column_config.NumberColumn(format="$%.0f")})
             st.download_button("Download every trade (spreadsheet)", tl.to_csv(index=False), "trades_2y.csv", "text/csv")
+            if len(mine) and "stop_price" in mine:
+                section("See a trade on the chart", "Pick any trade to see where it got in, where the stop and targets were, and where it got out.")
+                recent = mine.sort_values("entry_time", ascending=False).head(300).reset_index(drop=True)
+                ti = st.selectbox("Trade", list(range(len(recent))), format_func=lambda j: P.trade_option_label(recent.iloc[j]), key="tl_trade")
+                tr = recent.iloc[ti].to_dict()
+                head = (f"{P.strategy_name(pick)}: {'Buy' if tr['direction'] == 'LONG' else 'Sell'} · "
+                        f"{tr['result']} {P.usd(tr['pnl_usd_illustrative'])} · {P.exit_text(tr['exit_reason'])}")
+                fig = trade_chart(tr, head)
+                if fig is None:
+                    st.info("The price history for that day is not available here yet.")
+                else:
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.caption("Blue triangle = where it got in. Green zone = room to profit up to Target 2. Red zone = room to lose down to the stop. "
+                               "X = the average price where it got out (both halves, after costs).")
+            elif len(mine):
+                st.info("Trade prices for the chart appear after the next run of the 'Daily ingest and backtest' job.")
 
 # ---------------------------------------------------------- RELIABILITY TEST
 
@@ -491,6 +578,18 @@ with tabs[4]:
         fig.update_layout(xaxis_title="Trade number", yaxis_title="Running total ($)")
         st.plotly_chart(style(fig, 320), use_container_width=True)
         st.dataframe(pt.tail(100), use_container_width=True, hide_index=True)
+        need = {"dir", "strategy", "entry", "risk_per_share", "net_R", "entry_time", "exit_time", "exit_reason"}
+        if need <= set(pt.columns):
+            section("See a practice trade on the chart")
+            rec = pt.tail(100).iloc[::-1].reset_index(drop=True)
+            pi = st.selectbox("Trade", list(range(len(rec))), key="pt_trade",
+                              format_func=lambda j: f"{str(rec.loc[j, 'entry_time'])[:16]}  ·  {P.strategy_name(str(rec.loc[j, 'strategy']))}")
+            ptr = P.paper_trade_dict(rec.iloc[pi], STRATS, RISK)
+            pfig = trade_chart(ptr, f"{P.strategy_name(ptr['strategy'])}: {ptr['result']} {P.usd(ptr['pnl_usd_illustrative'])}")
+            if pfig is None:
+                st.info("The price history for that day is not available here yet.")
+            else:
+                st.plotly_chart(pfig, use_container_width=True)
     perf = agents.get("performance_adaptation_analyst", {}).get("findings", {})
     if perf:
         with st.expander("Technical details"):
