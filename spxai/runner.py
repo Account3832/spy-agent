@@ -26,6 +26,7 @@ from .backtest import report_markdown, run_research
 from .tradelog import summarize, trade_log
 from .config import Settings, kill_switch, load_settings, now_ny, state_dir
 from .features import add_features
+from .monitor import notify_signals, scan as monitor_scan
 from .orchestrator import decide, run_workflow
 from .paper import PaperLedger
 from .providers import (CircuitBreaker, YahooProvider, data_status, get_capability, get_intraday, DataError)
@@ -147,12 +148,21 @@ def evaluate(s: Settings, now=None, fetch=default_fetch, force: bool = False, ba
               ledger=summ, backtest=bt, paper=ledger.closed(), events=cal.load_events(), kill=killed, breaker_state=breaker_state)
     run_workflow(ctx)
     plan = decide(ctx)
+    try:  # live monitor: every strategy, saved for the dashboard; messages for rules that fired
+        mrows = monitor_scan(s, feats)
+        write_json(base / "monitor.json", {"as_of": str(now), "last_bar": last_bar, "decision": plan["decision"], "rows": mrows})
+        notify_signals(mrows, plan["decision"], s, base=base, symbol=s.symbol)
+    except Exception as e:  # noqa: BLE001  the monitor must never break the evaluation
+        print(f"monitor failed: {type(e).__name__}: {e}")
     if plan["decision"] in ("CALL", "PUT"):
         if ledger.open_position(plan["paper_position"]):
             send_alert(AlertType.ENTRY_TRIGGER,
-                       f"{plan['decision']} {s.symbol} via {plan['strategy_label']}: ref {plan['underlying_reference_price']}, "
-                       f"stop {plan['stop_loss_invalidation']['underlying_stop']}, T1 {plan['target_1']}, T2 {plan['target_2']}, "
-                       f"exit by {plan['time_exit']}. {plan['evidence_warning'] or ''}",
+                       f"ENTER {'LONG (buy)' if plan['decision'] == 'CALL' else 'SHORT (sell)'} {s.symbol} via {plan['strategy_label']}\n"
+                       f"Entry: next 5-minute candle open (about {plan['underlying_reference_price']})\n"
+                       f"Stop (exit if wrong): {plan['stop_loss_invalidation']['underlying_stop']}\n"
+                       f"Target 1: {plan['target_1']} (sell half, then move stop to entry)\n"
+                       f"Target 2: {plan['target_2']} (sell the rest)\n"
+                       f"Get out by {plan['time_exit']} at the latest.\n{plan['evidence_warning'] or ''}",
                        key=f"entry-{plan['paper_position']['label']}-{plan['signal_bar_start']}", base=base)
     else:
         for f in plan.get("setups_forming", []):
@@ -222,7 +232,7 @@ def _must(res: dict):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="spxai")
-    ap.add_argument("cmd", choices=["ingest", "backtest", "evaluate", "loop", "status", "report"])
+    ap.add_argument("cmd", choices=["ingest", "backtest", "evaluate", "loop", "status", "report", "telegram-test"])
     ap.add_argument("--force", action="store_true", help="run even if the market is closed")
     ap.add_argument("--days", type=int, default=60)
     a = ap.parse_args(argv)
@@ -235,6 +245,14 @@ def main(argv=None) -> int:
             print((base / "reports" / "backtest_latest.md").read_text() if "strategies" in r else json.dumps(r, indent=2))
         elif a.cmd == "evaluate":
             print(json.dumps(evaluate(s, force=a.force), indent=2, default=str))
+        elif a.cmd == "telegram-test":
+            from .alerts import send_telegram, telegram_enabled
+            if not telegram_enabled():
+                print("TELEGRAM NOT CONFIGURED: add the secrets TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to the repo.")
+                return 1
+            res = send_telegram("Test message from your SPY practice system. If you can read this, Telegram alerts work. Nothing was traded.")
+            print("Telegram result:", res)
+            return 0 if res == "delivered" else 1
         elif a.cmd == "loop":
             loop(s)
         elif a.cmd in ("status", "report"):

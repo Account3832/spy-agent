@@ -24,10 +24,33 @@ class AlertType(str, Enum):
     FEED_DISCONNECTED = "DATA_FEED_DISCONNECTED"
     STALE_QUOTE = "STALE_QUOTE"
     DAILY_LOCKOUT = "DAILY_LOCKOUT_ACTIVATED"
+    SIGNAL_NOT_TAKEN = "SIGNAL_NOT_TAKEN"
+    RESEARCH_SIGNAL = "RESEARCH_SIGNAL"
     SYSTEM = "SYSTEM"
 
 
-def send_alert(kind: AlertType, text: str, key: str | None = None, base: Path | None = None) -> dict:
+# Noisy "maybe soon" messages are saved in the app but not pushed to your phone unless SPXAI_TELEGRAM_FORMING=1.
+TELEGRAM_SKIP = {"SETUP_FORMING", "SETUP_INVALIDATED"}
+
+
+def telegram_enabled() -> bool:
+    return bool(os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"))
+
+
+def send_telegram(text: str) -> str:
+    """Sends one message. Returns 'delivered', 'not_configured', or a short error label. Never raises, never logs the token."""
+    tok, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+    if not (tok and chat):
+        return "not_configured"
+    try:
+        import requests
+        r = requests.post(f"https://api.telegram.org/bot{tok}/sendMessage", json={"chat_id": chat, "text": text}, timeout=10)
+        return "delivered" if r.ok else f"http_{r.status_code}"
+    except Exception as e:  # noqa: BLE001
+        return f"failed: {type(e).__name__}"
+
+
+def send_alert(kind: AlertType, text: str, key: str | None = None, base: Path | None = None, telegram: bool = True) -> dict:
     """Idempotent: an alert with the same key is not sent twice. Telegram failure never raises."""
     base = base or state_dir()
     path = base / "alerts.jsonl"
@@ -36,14 +59,11 @@ def send_alert(kind: AlertType, text: str, key: str | None = None, base: Path | 
         return {"sent": False, "reason": "duplicate"}
     msg = PREFIX + text
     rec = {"ts": str(pd.Timestamp.now(tz=TZ)), "type": kind.value, "message": msg, "key": k, "telegram": "not_configured"}
-    tok, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
-    if tok and chat:
-        try:
-            import requests
-            r = requests.post(f"https://api.telegram.org/bot{tok}/sendMessage",
-                              json={"chat_id": chat, "text": f"{kind.value}\n{msg}"}, timeout=10)
-            rec["telegram"] = "delivered" if r.ok else f"http_{r.status_code}"
-        except Exception as e:  # noqa: BLE001
-            rec["telegram"] = f"failed: {type(e).__name__}"
+    if telegram and (kind.value not in TELEGRAM_SKIP or os.environ.get("SPXAI_TELEGRAM_FORMING") == "1"):
+        rec["telegram"] = send_telegram(f"{kind.value}\n{msg}")
+    elif not telegram_enabled():
+        rec["telegram"] = "not_configured"
+    else:
+        rec["telegram"] = "not_sent_by_design"
     append_jsonl(path, rec)
     return {"sent": True, **rec}

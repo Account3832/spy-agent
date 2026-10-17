@@ -56,6 +56,7 @@ class Settings:
                                  "range_reversion", "vol_expansion")
     # tested and reported, but NEVER used for live practice trades until they pass the fair test and are promoted here
     research_only_strategies: tuple = ("orb_breakout", "vwap_reclaim", "gap_fade", "prior_day_break", "steady_scalper")
+    notify_research_signals: bool = False  # True = also push research-only signals to Telegram (noisy)
     # option selection
     target_delta: float = 0.35
     min_option_volume: int = 50
