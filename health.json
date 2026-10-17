@@ -1,0 +1,11 @@
+{
+  "ts": "2026-10-17 14:15:26.457178-04:00",
+  "ok": true,
+  "before": 96242,
+  "after": 96242,
+  "added": 0,
+  "source": "alpaca_iex",
+  "fetched_rows": 3296,
+  "quality": "OK",
+  "history_days": 1239
+}
