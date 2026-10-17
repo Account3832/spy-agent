@@ -23,6 +23,7 @@ from . import calendar as cal
 from .agents import Ctx
 from .alerts import AlertType, send_alert
 from .backtest import report_markdown, run_research
+from .tradelog import summarize, trade_log
 from .config import Settings, kill_switch, load_settings, now_ny, state_dir
 from .features import add_features
 from .orchestrator import decide, run_workflow
@@ -84,6 +85,11 @@ def backtest_job(s: Settings, base: Path | None = None) -> dict:
     write_json(base / "backtest_latest.json", rep)
     (base / "reports").mkdir(exist_ok=True)
     (base / "reports" / "backtest_latest.md").write_text(report_markdown(rep))
+    feats = add_features(hist)
+    log = trade_log(feats, s)  # last 2 years, trade by trade
+    (base / "reports").mkdir(exist_ok=True)
+    log.to_csv(base / "trades_2y.csv", index=False)
+    write_json(base / "trade_summary_2y.json", summarize(log, s))
     return rep
 
 
