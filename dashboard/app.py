@@ -27,6 +27,7 @@ for k in ("ALPACA_KEY_ID", "ALPACA_SECRET_KEY", "SPXAI_STATE_URL", "GITHUB_TOKEN
         pass
 
 from spxai import calendar as cal
+from spxai import monitor as MON
 from spxai import present as P
 from spxai import spreads as SP
 from spxai.config import TZ, load_settings, state_dir
@@ -345,6 +346,21 @@ def snapshot():
         return {}
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def scan_now():
+    """Checks every strategy against the newest COMPLETED 5-minute candle. Returns (rows, bar_close_text, source)."""
+    try:
+        df, src, _ = live_bars()
+        now = pd.Timestamp.now(tz=TZ)
+        df = df[df.index + pd.Timedelta(minutes=5) <= now] if len(df) else df
+        if len(df) < 120:
+            return [], None, src
+        f = add_features(df)
+        return MON.scan(S, f), str(f.index[-1] + pd.Timedelta(minutes=5)), src
+    except Exception:  # noqa: BLE001
+        return [], None, "error"
+
+
 # --------------------------------------------------------------------- data
 
 run = read_json("latest_run.json") or {}
@@ -377,7 +393,7 @@ st.caption(NO_OPTIONS_MSG + " Practice trades are simulated with SPY shares; spr
 if plan.get("data_status") == "delayed":
     st.warning("The price data is delayed or from an unofficial source. Check prices with your broker before acting.")
 
-tabs = st.tabs(["Today", "Spreads", "Charts", "2-year results", "Reliability test", "Paper trades", "Agents", "Data & health", "Logs"])
+tabs = st.tabs(["Today", "Monitor", "Spreads", "Charts", "2-year results", "Reliability test", "Paper trades", "Agents", "Data & health", "Logs"])
 
 # -------------------------------------------------------------------- TODAY
 
@@ -443,9 +459,75 @@ with tabs[0]:
              ("Practice result", P.usd(pt0.pnl_usd.sum()) if len(pt0) and "pnl_usd" in pt0 else "$0", "fake money",
               money_tone(pt0.pnl_usd.sum()) if len(pt0) and "pnl_usd" in pt0 else "")])
 
-# ------------------------------------------------------------------ SPREADS
+# ------------------------------------------------------------------ MONITOR
 
 with tabs[1]:
+    section("Live monitor", "Every strategy is checked against the newest finished 5-minute candle. Green means a rule has fired. Nothing is ever traded for you.")
+    rows, bar_close, mon_src = scan_now()
+    saved = read_json("monitor.json") or {}
+    from_saved = False
+    if not rows and saved.get("rows"):
+        rows, bar_close, from_saved = saved["rows"], saved.get("as_of"), True
+    al_all = read_jsonl("alerts.jsonl", 200)
+    tg = [a.get("telegram") for a in al_all if a.get("telegram") not in (None, "not_sent_by_design")]
+    tg_last = tg[-1] if tg else None
+    tg_label, tg_tone = (("Phone alerts: working", "good") if tg_last == "delivered"
+                         else ("Phone alerts: not set up yet", "warn") if tg_last in (None, "not_configured")
+                         else ("Phone alerts: last send failed", "bad"))
+    st.markdown(chip("Candle checked: " + (str(bar_close)[:16] if bar_close else "n/a"), "blue") + chip(tg_label, tg_tone)
+                + chip("Used saved check" if from_saved else "Checked just now", "warn" if from_saved else "good"), unsafe_allow_html=True)
+    if not rows:
+        st.info("Nothing to monitor yet. Run the 'Daily ingest and backtest' job, then wait for the next 5-minute check.")
+    else:
+        fired = [r for r in rows if r["status"] == "SIGNAL"]
+        if fired:
+            for r in fired:
+                side_good = r["direction"] == "LONG"
+                live_txt = "practice strategy" if r["kind"] == "Live practice" else "RESEARCH ONLY (not proven, not a practice trade)"
+                st.markdown(f'<div class="hero {"good" if side_good else "bad"}"><div class="eyebrow">{esc(P.strategy_name(r["strategy"]))} &middot; {esc(live_txt)}</div>'
+                            f'<div class="headline">{"BUY (go long)" if side_good else "SELL SHORT"} SPY</div>'
+                            f'<div class="sub">The rule fired on the candle that closed at {esc(str(r["bar_close"])[11:16])}. The entry would be the next candle\'s open.</div></div>',
+                            unsafe_allow_html=True)
+                kpi_row([("Enter near", price(r["entry_ref"]), "next candle open", ""), ("Exit if wrong", price(r["stop"]), "stop price", "bad"),
+                         ("Target 1", price(r["target1"]), "sell half", "good"), ("Target 2", price(r["target2"]), "sell the rest", "good"),
+                         ("Size", f'{r["shares"]} shares', f'risks about ${r["risk_usd"]:.0f}', "")])
+                st.write("")
+            if saved.get("decision") == "NO TRADE" and any(r["kind"] == "Live practice" for r in fired):
+                st.warning("A practice strategy fired, but the safety checks did not allow a practice trade. See the Today tab for the reasons.")
+        else:
+            st.markdown('<div class="hero"><div class="eyebrow">Right now</div><div class="headline">No rule has fired</div>'
+                        '<div class="sub">Waiting. Turn on the refresh box in the left menu and this page re-checks every 30 seconds.</div></div>', unsafe_allow_html=True)
+        table = pd.DataFrame([{"Strategy": P.strategy_name(r["strategy"]), "Type": r["kind"], "Status": {"SIGNAL": "SIGNAL", "FORMING": "Getting close",
+                                                                                                   "WAITING": "Waiting", "OFF": "Off"}[r["status"]],
+                               "Side": r["direction"].title(), "Enter near ($)": r["entry_ref"], "Stop ($)": r["stop"], "Target 1 ($)": r["target1"],
+                               "Target 2 ($)": r["target2"], "Shares": r["shares"], "What is happening": r["note"]} for r in rows])
+        st.dataframe(table, use_container_width=True, hide_index=True)
+        with st.expander("What each strategy is waiting for"):
+            for r in rows:
+                st.markdown(f"**{esc(P.strategy_name(r['strategy']))}** ({esc(r['kind'])}): {esc(r['waiting_for'])}")
+    section("Phone alerts (Telegram)", "A message is sent to your phone when a practice strategy fires. Research-only signals are saved here but not sent.")
+    recent = [a for a in al_all if a.get("type") in ("ENTRY_TRIGGER_CONFIRMED", "SIGNAL_NOT_TAKEN", "RESEARCH_SIGNAL", "TARGET_REACHED",
+                                                      "STOP_OR_RISK_LIMIT_REACHED", "MANDATORY_TIME_EXIT")][-8:]
+    if recent:
+        st.dataframe(pd.DataFrame([{"Time": str(a.get("ts", ""))[:19], "Type": str(a.get("type", "")).replace("_", " ").title(),
+                                    "Phone": {"delivered": "Sent", "not_configured": "Not set up", "not_sent_by_design": "Saved only"}.get(a.get("telegram"), a.get("telegram")),
+                                    "Message": str(a.get("message", ""))[:160]} for a in reversed(recent)]), use_container_width=True, hide_index=True)
+    else:
+        st.write("No signals yet.")
+    with st.expander("How to turn on phone alerts (about 10 minutes)"):
+        st.markdown(
+            "1. In Telegram, search for **@BotFather**, open it, send **/newbot**, and follow the two questions. It replies with a long **token**. Keep it private.\n"
+            "2. Open your new bot in Telegram and press **Start**. Then search for **@userinfobot**, press Start, and it replies with your **Id** (a number).\n"
+            "3. On GitHub open your repo, then **Settings, Secrets and variables, Actions, New repository secret**.\n"
+            "4. Make a secret named **TELEGRAM_BOT_TOKEN** and paste the token. Make a second one named **TELEGRAM_CHAT_ID** and paste the number.\n"
+            "5. Go to **Actions, Telegram test, Run workflow**. A test message should reach your phone.\n\n"
+            "Never paste the token into a chat or a file. Only into the GitHub secret box.")
+    st.caption("GitHub checks the market about every 5 minutes (sometimes a few minutes late), so a phone message can arrive up to about 10 minutes after the candle closes. "
+               "This tab checks the free price feed itself each time it refreshes (use the left-menu box for every 30 seconds). Entries are suggestions for PAPER trades only.")
+
+# ------------------------------------------------------------------ SPREADS
+
+with tabs[2]:
     section("Credit spread ideas on SPY", "Sell one option, buy a cheaper one further away as insurance, and collect money up front. PRACTICE ONLY.")
     st.info("Real option prices are not available on the free data plan, so every credit and chance below is an ESTIMATE from a standard "
             "pricing formula. Your broker's real prices will differ. Use these as a checklist for paper trades, not as signals.")
@@ -546,7 +628,7 @@ with tabs[1]:
 
 # ------------------------------------------------------------------- CHARTS
 
-with tabs[2]:
+with tabs[3]:
     df, src, err = live_bars()
     if err:
         st.warning("Could not get the newest prices, so this shows saved history. " + str(err)[:160])
@@ -585,7 +667,7 @@ with tabs[2]:
 
 # ------------------------------------------------------------- 2-YEAR RESULTS
 
-with tabs[3]:
+with tabs[4]:
     if not ts or not ts.get("strategies"):
         st.info("No results yet. Run the 'Daily ingest and backtest' job on GitHub (it needs at least about 5 days of saved data).")
     else:
@@ -690,7 +772,7 @@ with tabs[3]:
 
 # ---------------------------------------------------------- RELIABILITY TEST
 
-with tabs[4]:
+with tabs[5]:
     if "strategies" not in bt:
         st.info("No reliability test yet. The daily job on GitHub creates it once about 5 days of data are saved.")
     else:
@@ -728,7 +810,7 @@ with tabs[4]:
 
 # ------------------------------------------------------------- PAPER TRADES
 
-with tabs[5]:
+with tabs[6]:
     pt = read_csv("paper_trades.csv")
     st.caption("Practice trades with fake money, using SPY shares (not options). These are the best check of the rules, because they happen on new days.")
     open_pos = read_json("open_positions.json") or []
@@ -770,7 +852,7 @@ with tabs[5]:
 
 # ------------------------------------------------------------------- AGENTS
 
-with tabs[6]:
+with tabs[7]:
     st.caption("Eleven small checkers each look at one part of the picture. A separate risk checker can say no. None of them places an order.")
     if not agents:
         st.info("No checker results recorded yet.")
@@ -789,7 +871,7 @@ with tabs[6]:
 
 # ------------------------------------------------------------ DATA & HEALTH
 
-with tabs[7]:
+with tabs[8]:
     viol = cost_violations(S)
     kpi_row([("Data source", str(health.get("source", plan.get("data_source", "n/a"))).replace("_", " "), "where prices come from", ""),
              ("Days saved", str(health.get("history_days", "n/a")), "trading days of 5-minute data", ""),
@@ -809,7 +891,7 @@ with tabs[7]:
 
 # --------------------------------------------------------------------- LOGS
 
-with tabs[8]:
+with tabs[9]:
     section("Alerts", "Messages the system generated. They are notes, not orders.")
     al = read_jsonl("alerts.jsonl", 100)
     st.dataframe(pd.DataFrame(al).iloc[::-1] if al else pd.DataFrame(), use_container_width=True, hide_index=True)
@@ -826,6 +908,6 @@ for term, text in P.GLOSSARY:
 st.sidebar.markdown("---")
 st.sidebar.caption("Pause everything: create a file named KILL_SWITCH on the data branch (or set SPXAI_KILL=1).")
 st.sidebar.caption("Practice mode only. Not financial advice. Past results do not predict future results.")
-if st.sidebar.checkbox("Refresh this page every 60 seconds", value=False):
-    time.sleep(60)
+if st.sidebar.checkbox("Refresh this page every 30 seconds", value=False):
+    time.sleep(30)
     st.rerun()
