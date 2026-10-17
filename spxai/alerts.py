@@ -50,6 +50,29 @@ def send_telegram(text: str) -> str:
         return f"failed: {type(e).__name__}"
 
 
+def find_chat_ids() -> tuple[list[int], str]:
+    """Asks Telegram which chats have messaged the bot. Returns (ids, status). Never prints or returns the token."""
+    tok = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not tok:
+        return [], "no_token"
+    try:
+        import requests
+        r = requests.get(f"https://api.telegram.org/bot{tok}/getUpdates", timeout=10)
+        if r.status_code in (401, 404):
+            return [], "bad_token"
+        if not r.ok:
+            return [], f"http_{r.status_code}"
+        ids = set()
+        for u in r.json().get("result", []):
+            for key in ("message", "edited_message", "channel_post", "my_chat_member"):
+                chat = (u.get(key) or {}).get("chat") or {}
+                if "id" in chat:
+                    ids.add(int(chat["id"]))
+        return sorted(ids), "ok" if ids else "no_messages"
+    except Exception as e:  # noqa: BLE001
+        return [], f"failed: {type(e).__name__}"
+
+
 def send_alert(kind: AlertType, text: str, key: str | None = None, base: Path | None = None, telegram: bool = True) -> dict:
     """Idempotent: an alert with the same key is not sent twice. Telegram failure never raises."""
     base = base or state_dir()
