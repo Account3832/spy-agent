@@ -12,6 +12,15 @@ SPY underlying, 5-minute entries with 1-hour context. Real-time option quotes ar
    `SPXAI_STATE_URL = "https://raw.githubusercontent.com/<you>/<repo>/data"` (private repo: also a `GITHUB_TOKEN`).
    State lives on an auto-created `data` branch.
 
+## Where to get out, and chart reading
+Every signal gives a stop, two targets and the 15:45 ET time exit. There are two ways to set the stop and targets (`exit_mode` in `config/settings.yaml`):
+- `atr` (default): the stop is a fixed multiple of the recent average candle range, the targets are fixed multiples of the risk.
+- `chart`: the stop goes just beyond the nearest support (long) or resistance (short) zone and the targets just before the next opposing zones. If there is no sensible
+  chart plan (no room before the next zone, or the stop would be too wide) the practice trade is passed and the reason is shown.
+Alerts always show the chart-based alternative too. If the 15-minute trend structure breaks while a practice trade is open you get a "consider getting out" warning
+(advice only, it does not close the paper trade). The Reliability test tab compares the two exit styles on identical trades; keep `atr` until it shows an advantage.
+The **Levels & Trends** tab shows support/resistance zones and the trend on four time scales, and the Spreads tab now places sold strikes beyond strong zones.
+
 ## Kill switch
 Create a file named `KILL_SWITCH` in the state folder, or set env `SPXAI_KILL=1`, or `control.json`. All new setups stop.
 
