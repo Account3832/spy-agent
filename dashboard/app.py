@@ -27,6 +27,7 @@ for k in ("ALPACA_KEY_ID", "ALPACA_SECRET_KEY", "SPXAI_STATE_URL", "GITHUB_TOKEN
         pass
 
 from spxai import calendar as cal
+from spxai import levels as LV
 from spxai import monitor as MON
 from spxai import present as P
 from spxai import spreads as SP
@@ -356,9 +357,25 @@ def scan_now():
         if len(df) < 120:
             return [], None, src
         f = add_features(df)
-        return MON.scan(S, f), str(f.index[-1] + pd.Timedelta(minutes=5)), src
+        lvl = LV.analyze(df[["open", "high", "low", "close", "volume"]], LV.STOCK_TFS, offset_min=30, session_end="16:00")
+        return MON.scan(S, f, levels=lvl), str(f.index[-1] + pd.Timedelta(minutes=5)), src
     except Exception:  # noqa: BLE001
         return [], None, "error"
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def levels_now():
+    """Support/resistance zones, trend structure on four time scales, trendlines: from the newest COMPLETED candles (falls back to the saved file)."""
+    try:
+        df, _, _ = live_bars()
+        now = pd.Timestamp.now(tz=TZ)
+        df = df[df.index + pd.Timedelta(minutes=5) <= now] if len(df) else df
+        out = LV.analyze(df[["open", "high", "low", "close", "volume"]], LV.STOCK_TFS, offset_min=30, session_end="16:00") if len(df) >= 200 else {}
+        if out.get("ok"):
+            return out
+    except Exception:  # noqa: BLE001
+        pass
+    return read_json("levels.json") or {}
 
 
 # --------------------------------------------------------------------- data
@@ -393,7 +410,7 @@ st.caption(NO_OPTIONS_MSG + " Practice trades are simulated with SPY shares; spr
 if plan.get("data_status") == "delayed":
     st.warning("The price data is delayed or from an unofficial source. Check prices with your broker before acting.")
 
-tabs = st.tabs(["Today", "Monitor", "Spreads", "Charts", "2-year results", "Reliability test", "Paper trades", "Agents", "Data & health", "Logs"])
+tabs = st.tabs(["Today", "Monitor", "Levels & Trends", "Spreads", "Charts", "2-year results", "Reliability test", "Paper trades", "Agents", "Data & health", "Logs"])
 
 # -------------------------------------------------------------------- TODAY
 
@@ -491,6 +508,8 @@ with tabs[1]:
                 kpi_row([("Enter near", price(r["entry_ref"]), "next candle open", ""), ("Exit if wrong", price(r["stop"]), "stop price", "bad"),
                          ("Target 1", price(r["target1"]), "sell half", "good"), ("Target 2", price(r["target2"]), "sell the rest", "good"),
                          ("Size", f'{r["shares"]} shares', f'risks about ${r["risk_usd"]:.0f}', "")])
+                if P.chart_plan_line(r):
+                    st.caption(P.chart_plan_line(r))
                 st.write("")
             if saved.get("decision") == "NO TRADE" and any(r["kind"] == "Live practice" for r in fired):
                 st.warning("A practice strategy fired, but the safety checks did not allow a practice trade. See the Today tab for the reasons.")
@@ -527,7 +546,57 @@ with tabs[1]:
 
 # ------------------------------------------------------------------ SPREADS
 
+
+# ------------------------------------------------------------- LEVELS & TRENDS
 with tabs[2]:
+    section("Levels & Trends", "Support and resistance zones and the trend on four time scales, read the way a chart technician would. It describes the chart; it is not a promise.")
+    lvl = levels_now()
+    if not lvl.get("ok"):
+        st.info("Not enough price history yet. Run the 'Daily ingest and backtest' job first.")
+    else:
+        for line in lvl["reading"]:
+            st.write("- " + line)
+        ladder = pd.DataFrame([{"Scale": r_["label"], "Chart": r_["tf"], "Trend": r_["direction"], "Pattern": r_["pattern"], "Structure": r_["state"],
+                                "Last swing high": r_["swing_high"], "Last swing low": r_["swing_low"], "Trend fails if price closes beyond": r_["invalidation"],
+                                "Averages": r_["ema_state"]} for r_ in lvl["timeframes"]])
+        st.dataframe(ladder, hide_index=True, use_container_width=True)
+        if any(r_.get("limited_history") for r_ in lvl["timeframes"]):
+            st.caption("Some scales have little history yet (the daily scale needs about two months of saved data), so treat them as rough.")
+        ldf, lsrc, _ = live_bars()
+        if len(ldf) >= 200:
+            c1, c2 = st.columns(2)
+            with c1:
+                scale = st.selectbox("Chart size", ["5 minutes", "15 minutes", "1 hour"], index=1, key="lv_scale")
+            with c2:
+                nb = st.slider("Candles to show", 60, 300, 130, key="lv_n")
+            mins = {"5 minutes": 5, "15 minutes": 15, "1 hour": 60}[scale]
+            lab = {5: "Minor", 15: "Intermediate", 60: "Secondary"}[mins]
+            cb = LV.resample_tf(ldf[["open", "high", "low", "close", "volume"]], mins, offset_min=30 if mins == 60 else 0, session_end="16:00").iloc[-nb:]
+            fig = candles(cb, f"SPY {scale} candles with support and resistance", [], rsi=False)
+            for z in lvl["zones"]:
+                col = {"support": GREEN, "resistance": RED}.get(z["role"], AMBER)
+                fig.add_hrect(y0=z["low"], y1=z["high"], fillcolor=col, opacity=0.16 if z["strength"] != "Weak" else 0.07, line_width=0, row=1, col=1)
+                fig.add_annotation(x=cb.index.tz_localize(None)[-1], y=z["mid"], text=f"{z['strength']} {z['role']}", showarrow=False, xanchor="right", yshift=7,
+                                   font=dict(size=10, color=col))
+            for l_ in lvl["trendlines"]:
+                fig.add_trace(go.Scatter(x=[pd.Timestamp(l_["t1"]).tz_localize(None), pd.Timestamp(l_["t_now"]).tz_localize(None)], y=[l_["p1"], l_["p_now"]], mode="lines",
+                                         line=dict(color=GREEN if l_["kind"] == "support" else RED, dash="dash", width=1.2), showlegend=False), row=1, col=1)
+            pv = [q for q in lvl["pivots"].get(lab, []) if pd.Timestamp(q["time"]).tz_localize(None) >= cb.index.tz_localize(None)[0]]
+            for kind, mk, col in (("H", "triangle-down", RED), ("L", "triangle-up", GREEN)):
+                pts = [q for q in pv if q["kind"] == kind]
+                if pts:
+                    fig.add_trace(go.Scatter(x=[pd.Timestamp(q["time"]).tz_localize(None) for q in pts], y=[q["price"] for q in pts], mode="markers",
+                                             marker=dict(symbol=mk, size=9, color=col), showlegend=False), row=1, col=1)
+            lo_, hi_ = float(cb.low.min()), float(cb.high.max())
+            pad = (hi_ - lo_) * 0.08
+            fig.update_yaxes(range=[lo_ - pad, hi_ + pad], row=1, col=1)
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption("Green bands = support, red bands = resistance, amber = price is inside a zone. Triangles = confirmed swing points. Dashed lines = trendlines.")
+        zt = pd.DataFrame([{"Type": z["role"], "From": z["low"], "To": z["high"], "Strength": z["strength"], "Touches": z["touches"], "Scales": ", ".join(z["tfs"]),
+                            "Distance (ATR)": z["dist_atr"], "Note": z["former"] or ", ".join(z["labels"][:3])} for z in lvl["zones"]])
+        st.dataframe(zt, hide_index=True, use_container_width=True)
+
+with tabs[3]:
     section("Credit spread ideas on SPY", "Sell one option, buy a cheaper one further away as insurance, and collect money up front. PRACTICE ONLY.")
     st.info("Real option prices are not available on the free data plan, so every credit and chance below is an ESTIMATE from a standard "
             "pricing formula. Your broker's real prices will differ. Use these as a checklist for paper trades, not as signals.")
@@ -558,6 +627,7 @@ with tabs[2]:
             exp_f = st.selectbox("Expiry", ["All"] + [e.strftime("%a %b %d") for e in exps])
         sigma = rv * mult
         lv = SP.key_levels(daily, spot, ema_h, vw, today=NOW.date())
+        lv.update(SP.zone_levels(levels_now()))      # strikes sit beyond strong support/resistance zones
         ideas = SP.build_ideas(spot, sigma, NOW.date(), lv, bias_label, daily, width=int(width), risk_usd=float(RISK), expiries=exps)
         if kind_f != "All":
             ideas = [i for i in ideas if i["kind"] == kind_f]
@@ -628,7 +698,7 @@ with tabs[2]:
 
 # ------------------------------------------------------------------- CHARTS
 
-with tabs[3]:
+with tabs[4]:
     df, src, err = live_bars()
     if err:
         st.warning("Could not get the newest prices, so this shows saved history. " + str(err)[:160])
@@ -667,7 +737,7 @@ with tabs[3]:
 
 # ------------------------------------------------------------- 2-YEAR RESULTS
 
-with tabs[4]:
+with tabs[5]:
     if not ts or not ts.get("strategies"):
         st.info("No results yet. Run the 'Daily ingest and backtest' job on GitHub (it needs at least about 5 days of saved data).")
     else:
@@ -772,7 +842,7 @@ with tabs[4]:
 
 # ---------------------------------------------------------- RELIABILITY TEST
 
-with tabs[5]:
+with tabs[6]:
     if "strategies" not in bt:
         st.info("No reliability test yet. The daily job on GitHub creates it once about 5 days of data are saved.")
     else:
@@ -791,6 +861,25 @@ with tabs[5]:
         if base.get("trades"):
             st.write(f"**Yardstick:** the simple 1-hour trend rule averaged {P.usd(P.r_to_usd(base.get('net_expectancy_R'), RISK), decimals=2)} "
                      f"per trade over {base['trades']} trades. A rule set should beat this before it is worth the extra complexity.")
+        ce = bt.get("chart_exits")
+        if ce:
+            section("Chart-based exits vs fixed exits", ce["question"])
+            po = ce["pooled_out_of_sample"]
+            if po.get("paired_trades"):
+                st.write(f"Fair-test result on {po['paired_trades']} identical trades: fixed exits {P.usd(P.r_to_usd(po['atr_exp_R'], RISK), decimals=2)} per trade, chart exits "
+                         f"{P.usd(P.r_to_usd(po['chart_exp_R'], RISK), decimals=2)} per trade. **{P.exit_verdict_plain(ce['verdict'])}**")
+            else:
+                st.write("Not enough trades with a clean chart plan yet.")
+            rows_ = []
+            for n_, v_ in ce["per_strategy"].items():
+                a_ = v_["all_sample"]
+                if a_.get("trades"):
+                    rows_.append({"Rule set": P.strategy_name(n_), "Trades": a_["trades"], "Chart plan found": a_["with_chart_plan"],
+                                  "Passed (no clean plan)": a_["skipped_no_clean_plan"],
+                                  "Main reason passed": max(a_["skip_reasons"], key=a_["skip_reasons"].get) if a_["skip_reasons"] else ""})
+            if rows_:
+                st.dataframe(pd.DataFrame(rows_), hide_index=True, use_container_width=True)
+            st.caption("The chart method passes on trades with no room before the next zone or no sensible stop, so it takes fewer trades. To use chart exits for practice trades, set exit_mode: chart in config/settings.yaml.")
         section("What the verdicts mean")
         for code in ("UNDERLYING_EDGE_SUPPORTED", "NOT_DEMONSTRATED", "INSUFFICIENT_SAMPLE", "FAILED_OOS"):
             lab, tone, expl = P.verdict_info(code)
@@ -810,7 +899,7 @@ with tabs[5]:
 
 # ------------------------------------------------------------- PAPER TRADES
 
-with tabs[6]:
+with tabs[7]:
     pt = read_csv("paper_trades.csv")
     st.caption("Practice trades with fake money, using SPY shares (not options). These are the best check of the rules, because they happen on new days.")
     open_pos = read_json("open_positions.json") or []
@@ -852,7 +941,7 @@ with tabs[6]:
 
 # ------------------------------------------------------------------- AGENTS
 
-with tabs[7]:
+with tabs[8]:
     st.caption("Eleven small checkers each look at one part of the picture. A separate risk checker can say no. None of them places an order.")
     if not agents:
         st.info("No checker results recorded yet.")
@@ -871,7 +960,7 @@ with tabs[7]:
 
 # ------------------------------------------------------------ DATA & HEALTH
 
-with tabs[8]:
+with tabs[9]:
     viol = cost_violations(S)
     kpi_row([("Data source", str(health.get("source", plan.get("data_source", "n/a"))).replace("_", " "), "where prices come from", ""),
              ("Days saved", str(health.get("history_days", "n/a")), "trading days of 5-minute data", ""),
@@ -891,7 +980,7 @@ with tabs[8]:
 
 # --------------------------------------------------------------------- LOGS
 
-with tabs[9]:
+with tabs[10]:
     section("Alerts", "Messages the system generated. They are notes, not orders.")
     al = read_jsonl("alerts.jsonl", 100)
     st.dataframe(pd.DataFrame(al).iloc[::-1] if al else pd.DataFrame(), use_container_width=True, hide_index=True)

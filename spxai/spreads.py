@@ -96,6 +96,22 @@ def key_levels(daily: pd.DataFrame, spot: float, ema_hourly: float | None = None
     return {k: round(v, 2) for k, v in lv.items() if v and v > 0}
 
 
+def zone_levels(analysis: dict | None, min_strength: str = "Moderate") -> dict[str, float]:
+    """Strikes should sit BEYOND support/resistance zones. Returns {name: price}: the outer edge of each qualifying zone."""
+    if not analysis or not analysis.get("ok"):
+        return {}
+    ok = {"Strong"} if min_strength == "Strong" else {"Strong", "Moderate"}
+    out = {}
+    for z in analysis["zones"]:
+        if z["strength"] not in ok or z["role"] == "inside":
+            continue
+        if z["role"] == "resistance":
+            out[f"{z['strength'].lower()} resistance zone ({z['touches']} touches)"] = round(z["high"], 2)
+        else:
+            out[f"{z['strength'].lower()} support zone ({z['touches']} touches)"] = round(z["low"], 2)
+    return out
+
+
 def bias(spot: float, ema_hourly: float | None, vwap: float | None = None) -> str:
     """'bearish', 'bullish' or 'neutral' from price vs the hourly trend line (and the day's average price)."""
     if ema_hourly is None or ema_hourly != ema_hourly:

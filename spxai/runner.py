@@ -26,6 +26,7 @@ from .backtest import report_markdown, run_research
 from .tradelog import summarize, trade_log
 from .config import Settings, kill_switch, load_settings, now_ny, state_dir
 from .features import add_features
+from .levels import STOCK_TFS, Engine, analyze, trend_break_warning
 from .monitor import notify_signals, scan as monitor_scan
 from .orchestrator import decide, run_workflow
 from .paper import PaperLedger
@@ -82,7 +83,7 @@ def backtest_job(s: Settings, base: Path | None = None) -> dict:
                "detail": "need at least about 5 trading days of stored 5-minute bars; run ingest first"}
         write_json(base / "backtest_latest.json", msg)
         return msg
-    rep = run_research(add_features(hist), s)
+    rep = run_research(add_features(hist), s, engine=Engine(hist[["open", "high", "low", "close", "volume"]], STOCK_TFS, offset_min=30, session_end="16:00"))
     write_json(base / "backtest_latest.json", rep)
     (base / "reports").mkdir(exist_ok=True)
     (base / "reports" / "backtest_latest.md").write_text(report_markdown(rep))
@@ -144,12 +145,22 @@ def evaluate(s: Settings, now=None, fetch=default_fetch, force: bool = False, ba
     bt = read_json(base / "backtest_latest.json")
     if bt and "strategies" not in bt:
         bt = None
+    try:
+        lv = analyze(feats[["open", "high", "low", "close", "volume"]], STOCK_TFS, offset_min=30, session_end="16:00")
+    except Exception as e:  # noqa: BLE001  chart analysis must never break the evaluation
+        print(f"levels failed: {type(e).__name__}: {e}")
+        lv = {"ok": False}
+    for p_ in ledger.positions():
+        warn = trend_break_warning(lv, long=int(p_["dir"]) == 1, scales=("Intermediate",)) if p_.get("filled_alerted") else ""
+        if warn:
+            send_alert(AlertType.TREND_BREAK, f"{s.symbol}: {warn}", key=f"brk-{p_['id']}", base=base)
     ctx = Ctx(s, now, feats, src, cap, status, q, vix=vix if vix is not None else fetch_vix(s, now), chain=chain,
-              ledger=summ, backtest=bt, paper=ledger.closed(), events=cal.load_events(), kill=killed, breaker_state=breaker_state)
+              ledger=summ, backtest=bt, paper=ledger.closed(), events=cal.load_events(), kill=killed, breaker_state=breaker_state, levels=lv)
     run_workflow(ctx)
     plan = decide(ctx)
     try:  # live monitor: every strategy, saved for the dashboard; messages for rules that fired
-        mrows = monitor_scan(s, feats)
+        write_json(base / "levels.json", lv)
+        mrows = monitor_scan(s, feats, levels=lv)
         write_json(base / "monitor.json", {"as_of": str(now), "last_bar": last_bar, "decision": plan["decision"], "rows": mrows})
         notify_signals(mrows, plan["decision"], s, base=base, symbol=s.symbol)
     except Exception as e:  # noqa: BLE001  the monitor must never break the evaluation

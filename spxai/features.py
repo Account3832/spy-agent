@@ -161,4 +161,5 @@ def add_features(df5: pd.DataFrame) -> pd.DataFrame:
     d["regime"] = np.where((d.adx >= 22) & (d.h_dir != 0), "trend", np.where(d.adx < 18, "range", "transition"))
     med = d["atr"].rolling(78 * 20, min_periods=78).median()
     d["vol_regime"] = np.where(d.atr > 1.25 * med, "expanding", np.where(d.atr < 0.8 * med, "contracting", "normal"))
-    return d
+    from .levels import add_structure
+    return add_structure(d, 4, 4)       # confirmed swing highs/lows and trend structure (causal)

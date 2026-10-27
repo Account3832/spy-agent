@@ -51,6 +51,7 @@ class Ctx:
     health: dict = field(default_factory=dict)
     candidate: dict | None = None
     reports: dict = field(default_factory=dict)
+    levels: dict | None = None             # support/resistance zones and trend structure (levels.analyze)
 
 
 @dataclass
@@ -170,6 +171,32 @@ class RegimeAnalyst(Agent):
                         invalidation=inv)
 
 
+def _levels(ctx):
+    """Support/resistance analysis for this evaluation (computed once, from COMPLETED candles)."""
+    if ctx.levels is None:
+        from .levels import STOCK_TFS, analyze
+        try:
+            ctx.levels = analyze(ctx.df[["open", "high", "low", "close", "volume"]], STOCK_TFS, offset_min=30, session_end="16:00")
+        except Exception:  # noqa: BLE001
+            ctx.levels = {"ok": False}
+    return ctx.levels
+
+
+def _apply_chart_plan(ctx, cand: dict) -> None:
+    """Attach the chart-based plan to a candidate. With exit_mode "chart" it REPLACES the fixed ATR stop/targets (expressed as equivalent
+    multiples so risk sizing and reward:risk checks work unchanged); if there is no clean plan the reviewer vetoes the trade."""
+    from .levels import structure_plan
+    cp = structure_plan(_levels(ctx), cand["close"], cand["atr"], cand["dir"] == 1, **ctx.s.struct_params())
+    cand["chart_plan"] = cp
+    if ctx.s.exit_mode != "chart":
+        return
+    if cp["ok"]:
+        cand.update(plan_mode="chart", stop_atr=cp["risk"] / cand["atr"], t1_r=cp["t1_r"], t2_r=cp["t2_r"],
+                    stop_price=cp["stop"], t1_price=cp["t1"], t2_price=cp["t2"])
+    else:
+        cand.update(plan_mode="chart_none", chart_fail=cp["fail"])
+
+
 # -------------------------------------------------------- 2: 5m entries
 
 class EntryAnalyst(Agent):
@@ -189,7 +216,8 @@ class EntryAnalyst(Agent):
                               "trigger": sg["trigger"], "confirmation": sp.confirmation, "invalidation": sp.invalidation,
                               "stop_atr": st.stop_atr, "t1_r": st.t1_r, "t2_r": st.t2_r, "max_hold_bars": st.max_hold_bars,
                               "atr": float(r.atr), "close": float(r.close), "signal_time": str(d.index[-1]),
-                              "regime": r.regime, "h_dir": int(r.h_dir), "filters": list(st.filters)})
+                              "regime": r.regime, "h_dir": int(r.h_dir), "filters": list(st.filters), "plan_mode": "atr"})
+                _apply_chart_plan(ctx, cands[-1])
             f = st.forming(d)
             if f and sg["dir"] == 0:
                 forming.append({"strategy": name, "text": f})
@@ -351,6 +379,8 @@ class AdversarialReviewer(Agent):
         elif status in ("INSUFFICIENT_SAMPLE", "NO_BACKTEST", "NOT_DEMONSTRATED"):
             warns.append(f"evidence status {status}: this is a forward test, not a proven edge")
         k = c["dir"]
+        if c.get("plan_mode") == "chart_none":
+            vetoes.append("chart-based exits are on, but there is no clean plan: " + str(c.get("chart_fail", "")))
         if c["strategy"] in CONTINUATION and r.h_dir != k:
             vetoes.append("continuation setup conflicts with the 1-hour regime")
         if c["strategy"] in REVERSAL and r.h_dir == -k and r.adx >= 25:

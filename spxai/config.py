@@ -55,7 +55,12 @@ class Settings:
     enabled_strategies: tuple = ("trend_pullback", "orb_retest", "failed_breakout",
                                  "range_reversion", "vol_expansion")
     # tested and reported, but NEVER used for live practice trades until they pass the fair test and are promoted here
-    research_only_strategies: tuple = ("orb_breakout", "vwap_reclaim", "gap_fade", "prior_day_break", "steady_scalper")
+    research_only_strategies: tuple = ("orb_breakout", "vwap_reclaim", "gap_fade", "prior_day_break", "support_bounce", "swing_breakout", "steady_scalper", "zone_rejection")
+    exit_mode: str = "atr"            # "atr" = fixed ATR stop and R targets; "chart" = stop/targets from support and resistance zones
+    struct_min_room_r: float = 1.5
+    struct_min_risk_atr: float = 0.8
+    struct_max_risk_atr: float = 3.0
+    struct_buffer_atr: float = 0.25
     notify_research_signals: bool = False  # True = also push research-only signals to Telegram (noisy)
     # option selection
     target_delta: float = 0.35
@@ -63,6 +68,10 @@ class Settings:
     min_option_oi: int = 100
     option_commission_per_contract: float = 0.65
     decision_ttl_minutes: int = 10
+
+    def struct_params(self) -> dict:
+        return {"min_room_r": self.struct_min_room_r, "min_risk_atr": self.struct_min_risk_atr, "max_risk_atr": self.struct_max_risk_atr,
+                "buffer_atr": self.struct_buffer_atr}
 
 
 def load_settings(path: str | os.PathLike | None = None) -> Settings:
@@ -87,6 +96,8 @@ def load_settings(path: str | os.PathLike | None = None) -> Settings:
                 setattr(s, f.name, float(raw))
             elif isinstance(cur, str):
                 setattr(s, f.name, raw)
+    if s.exit_mode not in ("atr", "chart"):
+        raise ValueError("exit_mode must be 'atr' or 'chart'.")
     if s.mode != "paper":
         raise ValueError("Only mode='paper' is supported. Live execution is intentionally not implemented.")
     return s

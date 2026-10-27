@@ -69,6 +69,12 @@ class PaperLedger:
             entry = e_ref + k * slip
             risk = p["stop_atr"] * p["atr"]
             stop, t1, t2 = entry - k * risk, entry + k * p["t1_r"] * risk, entry + k * p["t2_r"] * risk
+            if p.get("plan_mode") == "chart":                  # stop and targets come from the chart, fixed at signal time
+                stop, t1, t2 = float(p["stop_price"]), float(p["t1_price"]), float(p["t2_price"])
+                risk = k * (entry - stop)
+                if risk <= 0.2 * p["atr"] or k * (t1 - entry) <= 0:     # price gapped past the plan before the fill
+                    self._finalize_cancel(p, events, "price opened beyond the chart-based plan")
+                    continue
             xt = cal.mandatory_exit_ts(date[i], self.s.mandatory_exit).strftime("%H:%M")
             later_day = date[-1] != date[i]
             res = resolve_trade(o, h, l, c, tod, date, i + 1, k, e_ref, entry, risk, stop, t1, t2, slip, xt,

@@ -24,6 +24,10 @@ STRATEGIES = {
                         "On quiet sideways days, buys near the bottom of the range and sells near the top."),
     "vol_expansion": ("Volatility Breakout",
                       "Jumps in when a quiet stretch suddenly turns into a big move."),
+    "support_bounce": ("Support / Resistance Bounce",
+                       "In a trend, waits for price to dip back to the last swing low (or rally to the last swing high) and get rejected, then joins the trend."),
+    "swing_breakout": ("Swing Breakout",
+                       "Buys a strong close above the last swing high (or sells a strong close below the last swing low) on above-normal volume."),
     "orb_breakout": ("Opening Range Breakout",
                      "Buys the first break above the first 30 minutes' high (or sells the first break below its low) when the 1-hour trend agrees."),
     "vwap_reclaim": ("VWAP Reclaim",
@@ -328,3 +332,22 @@ def win_rate_lesson(sb: pd.DataFrame) -> str | None:
             f"far more than Trend Pullback ({b['Win rate']:.0f} of 100). But its wins are small and its losses are big: its total result is "
             f"{usd(a['Total result ($)'])}, against {usd(b['Total result ($)'])} for Trend Pullback. "
             f"Chasing a very high win rate usually means taking a small profit and risking a lot, and one bad day can erase many wins.")
+
+
+def exit_verdict_plain(v: str) -> str:
+    return {"INSUFFICIENT_SAMPLE": "Too few trades to judge", "NOT_DEMONSTRATED": "No proof chart exits are better",
+            "CHART_EXITS_BETTER": "Chart exits did better in the fair test (still not a promise)",
+            "CHART_EXITS_WORSE": "Chart exits did worse in the fair test"}.get(v, v)
+
+
+def chart_plan_line(r: dict) -> str:
+    cp = r.get("chart_plan")
+    if not cp:
+        return ""
+    if r.get("plan_mode") == "chart":
+        return f"These levels come from the chart: stop {cp['stop_basis']}; target 1 {cp['t1_basis']}; target 2 {cp['t2_basis']}."
+    if r.get("plan_mode") == "chart_none":
+        return f"Chart-based exits are ON but there is no clean plan: {r['skip_reason']}. No practice trade."
+    if cp.get("ok"):
+        return f"Chart-based alternative: stop {cp['stop']:.2f}, target 1 {cp['t1']:.2f}, target 2 {cp['t2']:.2f} ({cp['t1_basis']})."
+    return f"Chart-based exits would pass on this one: {cp['fail']}."

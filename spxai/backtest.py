@@ -21,6 +21,7 @@ import pandas as pd
 
 from . import calendar as cal
 from .config import Settings
+from .levels import confluence_check, structure_plan
 from .strategies import ALL_FILTERS, BASELINE, REGISTRY, Strategy
 
 TOD_BUCKETS = [("09:45", "10:30"), ("10:30", "12:00"), ("12:00", "14:00"), ("14:00", "15:00"), ("15:00", "16:00")]
@@ -90,7 +91,24 @@ def resolve_trade(o, h, l, c, tod, date, i0, k, e_ref, entry, risk, stop, t1, t2
 
 # ------------------------------------------------------------- simulation
 
-def simulate(d: pd.DataFrame, strat: Strategy, s: Settings, dates: set | None = None) -> pd.DataFrame:
+def _plan_for(engine, d, i, s, entry, atr_i, k, strat=None, a=None):
+    """Chart-based stop and targets at signal bar i, using only candles complete at that bar's close."""
+    a = a if a is not None else engine.at(d.index[i] + pd.Timedelta(minutes=5), full=False)
+    params = s.struct_params()
+    if strat is not None and getattr(strat, "min_room_r", None):
+        params["min_room_r"] = strat.min_room_r
+    return structure_plan(a, entry, atr_i, k == 1, **params)
+
+
+def simulate(d: pd.DataFrame, strat: Strategy, s: Settings, dates: set | None = None, engine=None, exit_mode: str = "atr",
+             skips: list | None = None) -> pd.DataFrame:
+    """exit_mode "chart" needs `engine` (levels.Engine) and takes stop/targets from support and resistance zones; trades with no clean
+    chart plan are passed (their reasons are appended to `skips`)."""
+    chart_strat = bool(getattr(strat, "needs_chart", False))
+    cols0 = ["strategy", "label", "date", "signal_time", "entry_time", "exit_time", "dir", "entry", "risk",
+             "gross_R", "net_R", "exit_reason", "regime", "tod_bucket", "trigger"]
+    if chart_strat and engine is None:
+        return pd.DataFrame([], columns=cols0)       # a chart-checklist strategy cannot be tested without the chart engine
     sig = strat.signals(d, s.entry_start, s.entry_end)
     dirs = sig["dir"].values
     n = len(d)
@@ -119,6 +137,20 @@ def simulate(d: pd.DataFrame, strat: Strategy, s: Settings, dates: set | None = 
         entry = e_ref + k * slip
         risk = strat.stop_atr * atr[i]
         stop, t1, t2 = entry - k * risk, entry + k * strat.t1_r * risk, entry + k * strat.t2_r * risk
+        if exit_mode == "chart" or chart_strat:
+            a_i = engine.at(idx[i] + pd.Timedelta(minutes=5), full=False)
+            if chart_strat:
+                cf = confluence_check(a_i, entry, atr[i], l[i], c[i], bar_high=h[i], long=(k == 1))
+                if not cf["ok"]:
+                    if skips is not None:
+                        skips.append({"strategy": strat.name, "signal_time": idx[i], "date": dte, "reason": cf["why"]})
+                    continue
+            pl = _plan_for(engine, d, i, s, entry, atr[i], k, strat, a_i)
+            if not pl["ok"]:
+                if skips is not None:
+                    skips.append({"strategy": strat.name, "signal_time": idx[i], "date": dte, "reason": pl["fail"]})
+                continue
+            risk, stop, t1, t2 = pl["risk"], pl["stop"], pl["t1"], pl["t2"]
         res = resolve_trade(o, h, l, c, tod, date, i + 1, k, e_ref, entry, risk, stop, t1, t2, slip,
                             exit_tod[dte], strat.max_hold_bars, data_end_closes=True)
         gross, net, reasons, last_j = res["gross"], res["net"] - 2 * comm, res["reasons"], res["last_j"]
@@ -133,6 +165,89 @@ def simulate(d: pd.DataFrame, strat: Strategy, s: Settings, dates: set | None = 
     cols = ["strategy", "label", "date", "signal_time", "entry_time", "exit_time", "dir", "entry", "risk",
             "gross_R", "net_R", "exit_reason", "regime", "tod_bucket", "trigger"]
     return pd.DataFrame(trades, columns=cols)
+
+
+def _paired_outcome(d, i, k, strat, s, engine):
+    """Outcome of the SAME entry under chart-based exits. Returns (net_R, reason_if_skipped)."""
+    o, h, l, c, atr, tod, date = d.open.values, d.high.values, d.low.values, d.close.values, d.atr.values, d.tod.values, d.date.values
+    slip, comm = s.slippage_usd, s.commission_usd
+    e_ref = o[i + 1]
+    entry = e_ref + k * slip
+    pl = _plan_for(engine, d, i, s, entry, atr[i], k)
+    if not pl["ok"]:
+        return None, pl["fail"]
+    xt = cal.mandatory_exit_ts(date[i], s.mandatory_exit).strftime("%H:%M")
+    res = resolve_trade(o, h, l, c, tod, date, i + 1, k, e_ref, entry, pl["risk"], pl["stop"], pl["t1"], pl["t2"], slip, xt,
+                        strat.max_hold_bars, data_end_closes=True)
+    return (res["net"] - 2 * comm) / pl["risk"], ""
+
+
+def _reason_bucket(r: str) -> str:
+    return ("no room before the next zone" if "away (needs" in r else "stop would be too wide" if "too far" in r else
+            "no zone for a stop" if "no support" in r or "no resistance" in r else "chart analysis unavailable")
+
+
+def compare_exits(d: pd.DataFrame, s: Settings, names: list[str], engine, sp: dict | None = None) -> dict:
+    """Paired test: the SAME entries scored with fixed ATR exits versus chart-based exits. One pre-declared hypothesis
+    (chart exits earn more per trade at equal dollar risk), tested on the pooled live strategies, so no multiple-testing penalty is needed.
+    Per-strategy rows are descriptive only."""
+    sp = sp or chrono_split(sorted(set(d.date)))
+    oos_dates = set(sp["oos"])
+    per, pool = {}, {"all": [], "oos": []}
+    for n in names:
+        strat = REGISTRY[n]()
+        t = simulate(d, strat, s)
+        rows = []
+        for r in t.itertuples():
+            i = d.index.get_loc(r.signal_time)
+            net_c, why = _paired_outcome(d, i, int(r.dir), strat, s, engine)
+            rows.append({"date": r.date, "atr": float(r.net_R), "chart": net_c, "why": why})
+        df = pd.DataFrame(rows, columns=["date", "atr", "chart", "why"])
+
+        def stats(x: pd.DataFrame) -> dict:
+            if len(x) == 0:
+                return {"trades": 0}
+            ok = x[x.chart.notna()]
+            skipped = x[x.chart.isna()]
+            out = {"trades": int(len(x)), "with_chart_plan": int(len(ok)), "skipped_no_clean_plan": int(len(skipped)),
+                   "skip_reasons": skipped.why.map(_reason_bucket).value_counts().to_dict(),
+                   "atr_exp_R_all": round(float(x.atr.mean()), 3), "atr_total_R_all": round(float(x.atr.sum()), 1)}
+            if len(ok):
+                diff = (ok.chart - ok.atr).values.astype(float)
+                lo, hi = boot_ci(diff, 0.95)
+                out.update(atr_exp_R_same_trades=round(float(ok.atr.mean()), 3), chart_exp_R_same_trades=round(float(ok.chart.mean()), 3),
+                           mean_difference_R=round(float(diff.mean()), 3), diff_ci_low=round(lo, 3), diff_ci_high=round(hi, 3),
+                           chart_total_R_skips_as_zero=round(float(ok.chart.sum()), 1), chart_win_rate=round(float((ok.chart > 0).mean()), 3),
+                           atr_win_rate_same_trades=round(float((ok.atr > 0).mean()), 3))
+            return out
+        oos = df[df.date.isin(oos_dates)]
+        per[n] = {"all_sample": stats(df), "out_of_sample": stats(oos)}
+        pool["all"].append(df[df.chart.notna()])
+        pool["oos"].append(oos[oos.chart.notna()])
+
+    def pooled(frames) -> dict:
+        x = pd.concat(frames) if frames else pd.DataFrame(columns=["atr", "chart"])
+        if len(x) == 0:
+            return {"paired_trades": 0}
+        diff = (x.chart - x.atr).values.astype(float)
+        lo, hi = boot_ci(diff, 0.95)
+        return {"paired_trades": int(len(x)), "mean_difference_R": round(float(diff.mean()), 3), "ci_low": round(lo, 3), "ci_high": round(hi, 3),
+                "atr_exp_R": round(float(x.atr.mean()), 3), "chart_exp_R": round(float(x.chart.mean()), 3)}
+    p_oos, p_all = pooled(pool["oos"]), pooled(pool["all"])
+    n = p_oos.get("paired_trades", 0)
+    if n < s.min_trades_for_claim:
+        verdict, why = "INSUFFICIENT_SAMPLE", f"only {n} paired out-of-sample trades; at least {s.min_trades_for_claim} are needed"
+    elif p_oos["ci_low"] > 0:
+        verdict, why = "CHART_EXITS_BETTER", "the 95% range for the per-trade difference is above zero (still only past data)"
+    elif p_oos["ci_high"] < 0:
+        verdict, why = "CHART_EXITS_WORSE", "the 95% range for the per-trade difference is below zero"
+    else:
+        verdict, why = "NOT_DEMONSTRATED", "the 95% range for the per-trade difference includes zero"
+    return {"question": "At the same dollar risk per trade, do stops and targets taken from support/resistance zones earn more than fixed ATR exits on the same entries?",
+            "pooled_out_of_sample": p_oos, "pooled_all_sample": p_all, "verdict": verdict, "verdict_reason": why, "per_strategy": per,
+            "notes": ["Compared on identical entries; R is measured against each method's own stop, so both risk the same dollars per trade.",
+                      "Trades with no clean chart plan are passed by the chart method; see the skip counts and the 'skips as zero' totals.",
+                      "Chart zones at each entry use only candles that had closed by then."]}
 
 
 # ---------------------------------------------------------------- metrics
@@ -221,8 +336,10 @@ GRID_STOP = (1.0, 1.5, 2.0)
 GRID_T1 = (1.0, 1.5, 2.0)
 
 
-def run_research(d: pd.DataFrame, s: Settings, strategy_names=None, grid: bool = True) -> dict:
+def run_research(d: pd.DataFrame, s: Settings, strategy_names=None, grid: bool = True, engine=None) -> dict:
     names = list(strategy_names or (*s.enabled_strategies, *s.research_only_strategies))
+    if engine is None:
+        names = [n for n in names if not getattr(REGISTRY[n], "needs_chart", False)]
     dates = sorted(set(d.date))
     sp = chrono_split(dates)
     tv_dates = sp["train"] + sp["val"]
@@ -238,7 +355,8 @@ def run_research(d: pd.DataFrame, s: Settings, strategy_names=None, grid: bool =
     for name in names:
         cls = REGISTRY[name]
         strat = cls()
-        t = simulate(d, strat, s)
+        chart_strat = bool(getattr(strat, "needs_chart", False))
+        t = simulate(d, strat, s, engine=engine)
         n_cfg += 1
         oos = metrics(_slice(t, sp["oos"]), level)
         fold_res = []
@@ -257,7 +375,7 @@ def run_research(d: pd.DataFrame, s: Settings, strategy_names=None, grid: bool =
             by_day = t.groupby("date").net_R.sum()
             tot = by_day.sum()
             entry["top_day_share_of_total_R"] = round(float(by_day.max() / tot), 2) if tot > 0 else None
-        if grid:  # sensitivity on train+val ONLY
+        if grid and not chart_strat:  # sensitivity on train+val ONLY (not meaningful for chart-based exits)
             cells = {}
             for sa in GRID_STOP:
                 for t1 in GRID_T1:
@@ -291,6 +409,7 @@ def run_research(d: pd.DataFrame, s: Settings, strategy_names=None, grid: bool =
                         "target_fill": "requires trade-through by the slippage buffer",
                         "mandatory_exit": s.mandatory_exit, "max_trades_per_day": s.max_trades_per_day},
         "baseline_hourly_trend": {"out_of_sample": base_oos, "all_sample": metrics(base_t, level)},
+        "chart_exits": compare_exits(d, s, [n for n in names if n in s.enabled_strategies], engine, sp) if engine is not None else None,
         "strategies": results,
         "multiple_testing": {"configurations_evaluated": n_cfg, "ci_level_used": round(level, 4),
                              "note": "Bonferroni-adjusted across strategies. Grids and ablations used train+validation only."},
@@ -317,6 +436,10 @@ def report_markdown(rep: dict) -> str:
         o = r["out_of_sample_reported_once"]
         ci = f"[{o.get('ci_low')}, {o.get('ci_high')}]" if o.get("trades", 0) > 1 else "n/a"
         L.append(f"| {n} | {o.get('trades', 0)} | {o.get('net_expectancy_R', 'n/a')} | {ci} | {r['verdict']} |")
+    ce = rep.get("chart_exits")
+    if ce:
+        L += ["", "## Chart-based exits vs fixed exits (same entries)", f"Verdict: **{ce['verdict']}** - {ce['verdict_reason']}",
+              f"Pooled out-of-sample: {ce['pooled_out_of_sample']}"]
     L += ["", f"Baseline (1h-trend, one trade/day) OOS: {rep['baseline_hourly_trend']['out_of_sample']}", "",
           f"**Options research: {rep['options_profitability_research']['status']}** - {rep['options_profitability_research']['reason']}", ""]
     L += ["Limitations:"] + [f"- {x}" for x in rep["limitations"]]

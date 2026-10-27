@@ -119,6 +119,8 @@ def decide(ctx: Ctx) -> dict:
             "stop_loss_invalidation": {"underlying_stop": round(stop, 2), "rule": c["invalidation"],
                                        "note": "Underlying stop is NOT an option-premium stop."},
             "target_1": round(t1, 2), "target_2": round(t2, 2),
+            "exit_plan": ("chart-based (support/resistance)" if c.get("plan_mode") == "chart" else "fixed ATR multiples"),
+            "chart_plan_alternative": (c.get("chart_plan") or {}).get("text"),
             "target_logic": "half off at T1, stop to breakeven, remainder to T2",
             "time_exit": exit_ts.strftime("%H:%M ET"),
             "position_size": {"shares": sh, "contracts": risk.findings.get("contracts")},
@@ -136,4 +138,5 @@ def decide(ctx: Ctx) -> dict:
                                "atr": c["atr"], "stop_atr": c["stop_atr"], "t1_r": c["t1_r"], "t2_r": c["t2_r"],
                                "max_hold_bars": c["max_hold_bars"], "shares": sh, "regime": c["regime"],
                                "instrument": "SPY shares (simulated)" if not option_ok else "SPY option (simulated fill)",
-                               "evidence_status": ev_status}}
+                               "evidence_status": ev_status, "plan_mode": c.get("plan_mode", "atr"),
+                               **({"stop_price": c["stop_price"], "t1_price": c["t1_price"], "t2_price": c["t2_price"]} if c.get("plan_mode") == "chart" else {})}}
