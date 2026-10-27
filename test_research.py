@@ -265,5 +265,6 @@ def test_steady_scalper_is_research_only_and_fails_the_minimum_reward_risk_rule(
 def test_research_report_covers_research_only_strategies_with_stricter_multiple_testing():
     d = add_features(_gappy(60, seed=4))
     rep = run_research(d, Settings(), grid=False)
-    assert set(rep["strategies"]) == set(Settings().enabled_strategies) | set(Settings().research_only_strategies)
+    # the chart-checklist strategy (zone_rejection) is only tested when the chart engine is supplied, so it is absent here
+    assert set(rep["strategies"]) == (set(Settings().enabled_strategies) | set(Settings().research_only_strategies)) - {"zone_rejection"}
     assert abs(rep["multiple_testing"]["ci_level_used"] - round(1 - 0.05 / 12, 4)) < 1e-9     # Bonferroni over 12 strategies

@@ -19,6 +19,7 @@ Every signal gives a stop, two targets and the 15:45 ET time exit. There are two
   chart plan (no room before the next zone, or the stop would be too wide) the practice trade is passed and the reason is shown.
 Alerts always show the chart-based alternative too. If the 15-minute trend structure breaks while a practice trade is open you get a "consider getting out" warning
 (advice only, it does not close the paper trade). The Reliability test tab compares the two exit styles on identical trades; keep `atr` until it shows an advantage.
+A research-only strategy, `zone_rejection`, tests the trader-style checklist (rejection candle at a STRONG zone, bigger trend agrees, 2R of room, stop behind the zone, long and short). It never trades or alerts unless it first passes the fair test and is moved to the live list.
 The **Levels & Trends** tab shows support/resistance zones and the trend on four time scales, and the Spreads tab now places sold strikes beyond strong zones.
 
 ## Kill switch

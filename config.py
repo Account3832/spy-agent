@@ -55,7 +55,7 @@ class Settings:
     enabled_strategies: tuple = ("trend_pullback", "orb_retest", "failed_breakout",
                                  "range_reversion", "vol_expansion")
     # tested and reported, but NEVER used for live practice trades until they pass the fair test and are promoted here
-    research_only_strategies: tuple = ("orb_breakout", "vwap_reclaim", "gap_fade", "prior_day_break", "support_bounce", "swing_breakout", "steady_scalper")
+    research_only_strategies: tuple = ("orb_breakout", "vwap_reclaim", "gap_fade", "prior_day_break", "support_bounce", "swing_breakout", "steady_scalper", "zone_rejection")
     exit_mode: str = "atr"            # "atr" = fixed ATR stop and R targets; "chart" = stop/targets from support and resistance zones
     struct_min_room_r: float = 1.5
     struct_min_risk_atr: float = 0.8

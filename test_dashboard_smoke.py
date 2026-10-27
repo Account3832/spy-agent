@@ -155,7 +155,7 @@ def test_monitor_tab_lists_every_strategy_and_phone_alert_help():
     assert (base / "monitor.json").exists()
     import json
     rows = json.loads((base / "monitor.json").read_text())["rows"]
-    assert len(rows) == 12
+    assert len(rows) == 13
     out = _run_app(base)
     assert "Live monitor" in out and "Phone alerts (Telegram)" in out
     assert "Used saved check" in out or "Checked just now" in out

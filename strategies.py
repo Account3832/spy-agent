@@ -46,6 +46,8 @@ class Strategy:
     t1_r = 1.5
     t2_r = 3.0
     max_hold_bars = 36
+    needs_chart = False      # True = also needs the multi-scale chart checklist and chart-based exits (backtester and monitor apply them)
+    min_room_r = None        # for needs_chart strategies: minimum room to the next opposing zone, in R
 
     def __init__(self, filters=None, stop_atr=None, t1_r=None, t2_r=None, **params):
         self.filters = tuple(self.default_filters if filters is None else filters)
@@ -361,6 +363,35 @@ class SwingBreakout(Strategy):
         return longs, shorts, "first strong close beyond the last swing high/low"
 
 
+class ZoneRejection(Strategy):
+    """Trader-style checklist: a rejection candle at a STRONG support (long) or resistance (short) zone, with the bigger trend agreeing, room to run,
+    and a stop behind the zone. The candle test is cheap; the chart checklist (levels.confluence_check) and the chart-based exits are applied by the
+    backtester and the monitor because they need the multi-scale chart analysis as of that candle. Research only."""
+    spec = StrategySpec(
+        "zone_rejection", "1.0",
+        "A candle that probes a strong support (or resistance) zone and is rejected, while the bigger trend agrees and there is room to run, tends to reverse away from it.",
+        "How chart traders actually use levels: only strong zones, only with the bigger trend, only with a rejection candle, stop behind the zone.",
+        "Rejection candle (closes in the strong 40% of its range, wick at least 40% of range, range at least 0.8 ATR) with the 1-hour trend agreeing; "
+        "then the chart checklist must pass: bigger trend agrees, strong zone touched, entry within 1.5 ATR of it.",
+        "1h trend agrees.", "Close beyond the zone against the trade.", "Just beyond the zone (chart-based).", "Just before the next opposing zone; at least 2R of room.",
+        "Flat at the mandatory exit.", "Same as trend_pullback.", "Max 2 signals per direction per day.", "30 minutes to 3 hours")
+    default_filters = ("htf",)
+    needs_chart = True
+    min_room_r = 2.0
+
+    def raw(self, d):
+        rng = (d.high - d.low)
+        r = rng.where(rng > 0)
+        big = rng >= 0.8 * d.atr
+        up = (d.close > d.open) & ((d.close - d.low) / r >= 0.6) & ((d[["open", "close"]].min(axis=1) - d.low) / r >= 0.4) & big
+        dn = (d.close < d.open) & ((d.high - d.close) / r >= 0.6) & ((d.high - d[["open", "close"]].max(axis=1)) / r >= 0.4) & big
+        longs, shorts = up.fillna(False), dn.fillna(False)
+        longs, shorts = longs & ~longs.shift(1, fill_value=False), shorts & ~shorts.shift(1, fill_value=False)
+        longs = longs & (longs.groupby(d.date).cumsum() <= 2)
+        shorts = shorts & (shorts.groupby(d.date).cumsum() <= 2)
+        return longs, shorts, "rejection candle at a strong level"
+
+
 class SteadyScalper(TrendPullback):
     """Same entries as trend_pullback, but a wide stop and a very near target. Built to SHOW the trade-off:
     it wins often, yet each loss is large. Research only: its reward is too small versus risk to pass the risk manager."""
@@ -374,7 +405,7 @@ class SteadyScalper(TrendPullback):
 
 
 REGISTRY = {c.spec.name: c for c in (TrendPullback, OrbRetest, FailedBreakout, RangeReversion, VolExpansion,
-                                             OrbBreakout, VwapReclaim, GapFade, PriorDayBreak, SupportBounce, SwingBreakout, SteadyScalper)}
+                                             OrbBreakout, VwapReclaim, GapFade, PriorDayBreak, SupportBounce, SwingBreakout, SteadyScalper, ZoneRejection)}
 BASELINE = BaselineHourlyTrend
 
 

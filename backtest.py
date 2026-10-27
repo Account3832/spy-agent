@@ -21,7 +21,7 @@ import pandas as pd
 
 from . import calendar as cal
 from .config import Settings
-from .levels import structure_plan
+from .levels import confluence_check, structure_plan
 from .strategies import ALL_FILTERS, BASELINE, REGISTRY, Strategy
 
 TOD_BUCKETS = [("09:45", "10:30"), ("10:30", "12:00"), ("12:00", "14:00"), ("14:00", "15:00"), ("15:00", "16:00")]
@@ -91,16 +91,24 @@ def resolve_trade(o, h, l, c, tod, date, i0, k, e_ref, entry, risk, stop, t1, t2
 
 # ------------------------------------------------------------- simulation
 
-def _plan_for(engine, d, i, s, entry, atr_i, k):
+def _plan_for(engine, d, i, s, entry, atr_i, k, strat=None, a=None):
     """Chart-based stop and targets at signal bar i, using only candles complete at that bar's close."""
-    a = engine.at(d.index[i] + pd.Timedelta(minutes=5), full=False)
-    return structure_plan(a, entry, atr_i, k == 1, **s.struct_params())
+    a = a if a is not None else engine.at(d.index[i] + pd.Timedelta(minutes=5), full=False)
+    params = s.struct_params()
+    if strat is not None and getattr(strat, "min_room_r", None):
+        params["min_room_r"] = strat.min_room_r
+    return structure_plan(a, entry, atr_i, k == 1, **params)
 
 
 def simulate(d: pd.DataFrame, strat: Strategy, s: Settings, dates: set | None = None, engine=None, exit_mode: str = "atr",
              skips: list | None = None) -> pd.DataFrame:
     """exit_mode "chart" needs `engine` (levels.Engine) and takes stop/targets from support and resistance zones; trades with no clean
     chart plan are passed (their reasons are appended to `skips`)."""
+    chart_strat = bool(getattr(strat, "needs_chart", False))
+    cols0 = ["strategy", "label", "date", "signal_time", "entry_time", "exit_time", "dir", "entry", "risk",
+             "gross_R", "net_R", "exit_reason", "regime", "tod_bucket", "trigger"]
+    if chart_strat and engine is None:
+        return pd.DataFrame([], columns=cols0)       # a chart-checklist strategy cannot be tested without the chart engine
     sig = strat.signals(d, s.entry_start, s.entry_end)
     dirs = sig["dir"].values
     n = len(d)
@@ -129,8 +137,15 @@ def simulate(d: pd.DataFrame, strat: Strategy, s: Settings, dates: set | None = 
         entry = e_ref + k * slip
         risk = strat.stop_atr * atr[i]
         stop, t1, t2 = entry - k * risk, entry + k * strat.t1_r * risk, entry + k * strat.t2_r * risk
-        if exit_mode == "chart":
-            pl = _plan_for(engine, d, i, s, entry, atr[i], k)
+        if exit_mode == "chart" or chart_strat:
+            a_i = engine.at(idx[i] + pd.Timedelta(minutes=5), full=False)
+            if chart_strat:
+                cf = confluence_check(a_i, entry, atr[i], l[i], c[i], bar_high=h[i], long=(k == 1))
+                if not cf["ok"]:
+                    if skips is not None:
+                        skips.append({"strategy": strat.name, "signal_time": idx[i], "date": dte, "reason": cf["why"]})
+                    continue
+            pl = _plan_for(engine, d, i, s, entry, atr[i], k, strat, a_i)
             if not pl["ok"]:
                 if skips is not None:
                     skips.append({"strategy": strat.name, "signal_time": idx[i], "date": dte, "reason": pl["fail"]})
@@ -323,6 +338,8 @@ GRID_T1 = (1.0, 1.5, 2.0)
 
 def run_research(d: pd.DataFrame, s: Settings, strategy_names=None, grid: bool = True, engine=None) -> dict:
     names = list(strategy_names or (*s.enabled_strategies, *s.research_only_strategies))
+    if engine is None:
+        names = [n for n in names if not getattr(REGISTRY[n], "needs_chart", False)]
     dates = sorted(set(d.date))
     sp = chrono_split(dates)
     tv_dates = sp["train"] + sp["val"]
@@ -338,7 +355,8 @@ def run_research(d: pd.DataFrame, s: Settings, strategy_names=None, grid: bool =
     for name in names:
         cls = REGISTRY[name]
         strat = cls()
-        t = simulate(d, strat, s)
+        chart_strat = bool(getattr(strat, "needs_chart", False))
+        t = simulate(d, strat, s, engine=engine)
         n_cfg += 1
         oos = metrics(_slice(t, sp["oos"]), level)
         fold_res = []
@@ -357,7 +375,7 @@ def run_research(d: pd.DataFrame, s: Settings, strategy_names=None, grid: bool =
             by_day = t.groupby("date").net_R.sum()
             tot = by_day.sum()
             entry["top_day_share_of_total_R"] = round(float(by_day.max() / tot), 2) if tot > 0 else None
-        if grid:  # sensitivity on train+val ONLY
+        if grid and not chart_strat:  # sensitivity on train+val ONLY (not meaningful for chart-based exits)
             cells = {}
             for sa in GRID_STOP:
                 for t1 in GRID_T1:

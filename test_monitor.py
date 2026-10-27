@@ -17,7 +17,7 @@ def _rows():
 
 def test_scan_covers_all_twelve_and_flags_the_signal():
     rows = _rows()
-    assert len(rows) == 12 and {r["kind"] for r in rows} == {"Live practice", "Research only"}
+    assert len(rows) == 13 and {r["kind"] for r in rows} == {"Live practice", "Research only"}
     tp = next(r for r in rows if r["strategy"] == "trend_pullback")
     assert tp["status"] == "SIGNAL" and tp["direction"] in ("LONG", "SHORT")
     k = 1 if tp["direction"] == "LONG" else -1

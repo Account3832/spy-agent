@@ -24,7 +24,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 STEP_MIN = 5   # base candle size of the stored data
 
 # label, timeframe (minutes or "D"), swing window (bars each side), weight in the alignment score
-CRYPTO_TFS = (("Primary", "D", 3, 3.0), ("Secondary", 240, 3, 2.0), ("Intermediate", 60, 3, 1.5), ("Minor", 15, 4, 1.0))
+CRYPTO_TFS = (("Primary", "D", 3, 3.0), ("Secondary", 240, 3, 2.0), ("Intermediate", 60, 3, 1.5), ("Minor", 15, 4, 1.0), ("Micro", 5, 4, 0.5))
 STOCK_TFS = (("Primary", "D", 3, 3.0), ("Secondary", 60, 3, 2.0), ("Intermediate", 15, 4, 1.5), ("Minor", 5, 4, 1.0))
 
 
@@ -156,7 +156,7 @@ def alignment(tfs: list[dict]) -> dict:
     score = sum(t["weight"] * sgn(t) for t in tfs) / wsum
     big = [t for t in tfs if t["label"] in ("Primary", "Secondary")]
     big_s = (sum(t["weight"] * sgn(t) for t in big) / (sum(t["weight"] for t in big) or 1.0)) if big else 0.0
-    small = [t for t in tfs if t["label"] in ("Intermediate", "Minor")]
+    small = [t for t in tfs if t["label"] in ("Intermediate", "Minor", "Micro")]
     small_s = (sum(t["weight"] * sgn(t) for t in small) / (sum(t["weight"] for t in small) or 1.0)) if small else 0.0
     if score >= 0.75:
         text, kind = "All time scales point UP. The trend is aligned.", "ALIGNED_UP"
@@ -328,7 +328,7 @@ class Engine:
             if a_now and (label == "Intermediate" or atr_ref is None and label in ("Secondary", "Minor")):
                 atr_ref = a_now
             lim = 12 * (a_now or price * 0.01)
-            for i in range(max(0, m - 14), m):
+            for i in (range(max(0, m - 14), m) if label != "Micro" else ()):   # the 5-minute scale reads the trend only; its swings are too noisy to be zones
                 if abs(fr["pp"][i] - price) <= lim:
                     points.append({"price": float(fr["pp"][i]), "kind": str(fr["pk"][i]), "w": weight, "time": fr["pt"][i], "tf": name, "label": label})
             if full:
@@ -502,6 +502,41 @@ def structure_plan(a: dict | None, entry: float, atr: float, long: bool = True, 
             f"target 2 {t2:.6g} ({t2_basis}, {t2_r:.1f}R).")
     return {"ok": True, "fail": "", "stop": float(stop), "t1": float(t1), "t2": float(t2), "risk": float(risk), "t1_r": float(t1_r), "t2_r": float(t2_r),
             "blended_rr": float(0.5 * t1_r + 0.5 * t2_r), "stop_basis": stop_basis, "t1_basis": t1_basis, "t2_basis": t2_basis, "text": text}
+
+
+def confluence_check(a: dict | None, entry: float, atr: float, bar_low: float, bar_close: float, bar_high: float | None = None,
+                     long: bool = True, touch_atr: float = 0.25, max_dist_atr: float = 1.5) -> dict:
+    """The 'trader-style' checklist for trading a rejection at a level (long: buy at support; short: sell at resistance).
+    Every rule is fixed in advance (nothing tuned). ALL must hold:
+      1. Bigger picture: the combined trend across the scales agrees (aligned, a pullback inside the bigger trend, or mostly with it).
+      2. Location: the signal candle reached a STRONG zone (within `touch_atr` ATR of it) and closed back away from it.
+      3. Not chasing: the entry is no more than `max_dist_atr` ATR away from that zone.
+    Room before the next opposing zone and the stop behind the zone are checked by structure_plan with its own rules."""
+    no = lambda why: {"ok": False, "why": why, "zone": None}
+    if not a or not a.get("ok") or not atr or atr <= 0:
+        return no("the chart analysis is not available yet")
+    al = a.get("alignment") or {}
+    good = ("ALIGNED_UP", "PULLBACK_IN_UPTREND", "MOSTLY_UP") if long else ("ALIGNED_DOWN", "BOUNCE_IN_DOWNTREND", "MOSTLY_DOWN")
+    if al.get("kind") not in good:
+        return no(f"the bigger trend is not {'up' if long else 'down'} (" + str(al.get("kind", "unknown")).replace("_", " ").lower() + ")")
+    if long:
+        strong = [z for z in a["zones"] if z["strength"] == "Strong" and z["role"] in ("support", "inside")]
+        touched = [z for z in strong if bar_low <= z["high"] + touch_atr * atr and bar_low >= z["low"] - 1.5 * atr and bar_close > z["high"]]
+        if not touched:
+            return no("the candle did not reject a strong support zone")
+        z = max(touched, key=lambda q: q["high"])
+        if entry - z["high"] > max_dist_atr * atr:
+            return no(f"price is already {((entry - z['high']) / atr):.1f} ATR above that support (too late)")
+    else:
+        hi = bar_high if bar_high is not None else bar_close
+        strong = [z for z in a["zones"] if z["strength"] == "Strong" and z["role"] in ("resistance", "inside")]
+        touched = [z for z in strong if hi >= z["low"] - touch_atr * atr and hi <= z["high"] + 1.5 * atr and bar_close < z["low"]]
+        if not touched:
+            return no("the candle did not reject a strong resistance zone")
+        z = min(touched, key=lambda q: q["low"])
+        if z["low"] - entry > max_dist_atr * atr:
+            return no(f"price is already {((z['low'] - entry) / atr):.1f} ATR below that resistance (too late)")
+    return {"ok": True, "why": "", "zone": {k: z[k] for k in ("low", "high", "mid", "strength", "touches")}}
 
 
 def trend_break_warning(a: dict | None, long: bool = True, scales=("Intermediate", "Secondary")) -> str:

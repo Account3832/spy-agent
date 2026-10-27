@@ -10,7 +10,7 @@ import math
 import pandas as pd
 
 from .config import Settings
-from .levels import room_to_levels, structure_plan
+from .levels import confluence_check, room_to_levels, structure_plan
 from .strategies import REGISTRY
 
 STATUS_ORDER = {"SIGNAL": 0, "FORMING": 1, "WAITING": 2, "OFF": 3}
@@ -73,7 +73,12 @@ def scan(s: Settings, feats: pd.DataFrame, names=None, levels: dict | None = Non
             row.update(status="OFF", note=f"could not be checked: {type(e).__name__}")
             rows.append(row)
             continue
-        if int(sig["dir"]) != 0 and atr:
+        chart_strat = bool(getattr(inst, "needs_chart", False))
+        cf_fail = ""
+        if chart_strat and int(sig["dir"]) != 0 and atr:      # the chart checklist decides whether the candle is a real signal
+            cf = confluence_check(levels, float(last.close), atr, float(last.low), float(last.close), bar_high=float(last.high), long=(int(sig["dir"]) == 1))
+            cf_fail = "" if cf["ok"] else cf["why"]
+        if int(sig["dir"]) != 0 and atr and not cf_fail:
             k = int(sig["dir"])
             risk = inst.stop_atr * atr
             entry = float(last.close)
@@ -81,10 +86,13 @@ def scan(s: Settings, feats: pd.DataFrame, names=None, levels: dict | None = Non
                        risk_per_share=round(risk, 2), stop=round(entry - k * risk, 2), target1=round(entry + k * inst.t1_r * risk, 2),
                        target2=round(entry + k * inst.t2_r * risk, 2), shares=max(int(risk_usd // risk), 0) if risk > 0 else 0,
                        risk_usd=round(risk_usd, 2), note="The rule fired on the newest completed candle. Entry would be the NEXT candle's open.")
-            cp = structure_plan(levels, entry, atr, k == 1, **s.struct_params())
+            sp_ = s.struct_params()
+            if getattr(inst, "min_room_r", None):
+                sp_["min_room_r"] = inst.min_room_r
+            cp = structure_plan(levels, entry, atr, k == 1, **sp_)
             row["chart_plan"] = {kk: (round(v, 2) if isinstance(v, float) else v) for kk, v in cp.items()}
             row["plan_mode"] = "atr"
-            if s.exit_mode == "chart":
+            if s.exit_mode == "chart" or chart_strat:
                 if cp["ok"]:
                     row.update(plan_mode="chart", risk_per_share=round(cp["risk"], 2), stop=round(cp["stop"], 2), target1=round(cp["t1"], 2),
                                target2=round(cp["t2"], 2), shares=max(int(risk_usd // cp["risk"]), 0))
@@ -104,6 +112,8 @@ def scan(s: Settings, feats: pd.DataFrame, names=None, levels: dict | None = Non
                 blk = _blockers(inst, feats, s)
             except Exception:  # noqa: BLE001
                 pass
+            if cf_fail:
+                blk = list(blk) + [cf_fail]
             if blk:
                 row.update(status="FORMING", note="The trigger candle appeared, but: " + "; ".join(blk) + ".")
             elif f:
