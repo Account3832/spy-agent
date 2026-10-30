@@ -1,0 +1,8 @@
+id,strategy,label,dir,signal_time,entry_time,exit_time,entry,risk_per_share,shares,net_R,gross_R,pnl_usd,exit_reason,regime,instrument,evidence_status
+0670ca53deae,vol_expansion,vol_expansion@1.0#750b320a,-1,2026-10-16 13:00:00-04:00,2026-10-16 13:05:00-04:00,2026-10-16 13:30:00-04:00,764.55,1.125,107,0.741,0.768,89.2,T1|BE-stop,trend,SPY shares (simulated),NOT_DEMONSTRATED
+aee3b6b19e9b,trend_pullback,trend_pullback@1.0#6551a6ed,-1,2026-10-16 13:50:00-04:00,2026-10-16 13:55:00-04:00,2026-10-16 15:45:00-04:00,763.78,1.306,92,1.389,1.412,166.96,T1|time,trend,SPY shares (simulated),NOT_DEMONSTRATED
+e37dea07ecf9,trend_pullback,trend_pullback@1.0#6551a6ed,-1,2026-10-22 11:40:00-04:00,2026-10-22 11:45:00-04:00,2026-10-22 11:55:00-04:00,763.235,1.386,87,-1.014,-0.986,-122.33,stop|stop,trend,SPY shares (simulated),NOT_DEMONSTRATED
+0d028f09b4ef,trend_pullback,trend_pullback@1.0#6551a6ed,-1,2026-10-22 12:45:00-04:00,2026-10-22 12:50:00-04:00,2026-10-22 12:55:00-04:00,762.55,1.188,101,-1.017,-0.983,-121.99,stop|stop,trend,SPY shares (simulated),NOT_DEMONSTRATED
+726fbb585687,failed_breakout,failed_breakout@1.0#95a5a945,1,2026-10-27 10:20:00-04:00,2026-10-27 10:25:00-04:00,2026-10-27 10:45:00-04:00,765.94,0.653,180,2.25,2.281,264.49,T1|T2,range,SPY shares (simulated),NOT_DEMONSTRATED
+fea7d8a24278,trend_pullback,trend_pullback@1.0#6551a6ed,1,2026-10-27 13:10:00-04:00,2026-10-27 13:15:00-04:00,2026-10-27 14:30:00-04:00,769.72,0.605,193,-1.033,-0.967,-120.64,stop|stop,trend,SPY shares (simulated),NOT_DEMONSTRATED
+f186a590b180,trend_pullback,trend_pullback@1.0#6551a6ed,-1,2026-10-30 12:50:00-04:00,2026-10-30 12:55:00-04:00,2026-10-30 14:15:00-04:00,755.585,1.077,111,2.25,2.269,268.86,T1|T2,trend,SPY shares (simulated),NOT_DEMONSTRATED

@@ -1,0 +1,817 @@
+{
+  "plan": {
+    "timestamp": "2026-10-30 15:30:34.573967-04:00",
+    "timezone": "America/New_York",
+    "data_status": "live",
+    "data_source": "alpaca_iex",
+    "instrument": "SPY",
+    "agent_disagreements": [],
+    "regime": "bearish",
+    "mode": "PAPER ONLY - no order is ever sent",
+    "decision": "NO TRADE",
+    "failed_requirements": [
+      {
+        "requirement": "2/3. setup confirmed and entry trigger occurred",
+        "detail": "no strategy trigger on the latest completed 5-minute bar"
+      }
+    ],
+    "setups_forming": [
+      {
+        "strategy": "trend_pullback",
+        "text": "1h trend down; price within 0.5 ATR of EMA21, waiting for a reclaim of the prior bar extreme"
+      },
+      {
+        "strategy": "orb_retest",
+        "text": "Price is below the opening range low; waiting for a retest that holds"
+      }
+    ],
+    "re_evaluate_when": "after the next 5-minute bar closes (about 15:35 ET); "
+  },
+  "agents": {
+    "data_quality_monitor": {
+      "agent": "data_quality_monitor",
+      "agent_version": "1.0",
+      "timestamp": "2026-10-30 15:30:34.573967-04:00",
+      "input_snapshot": {
+        "last_bar_start": "2026-10-30 15:25:00-04:00",
+        "bars": 97016,
+        "source": "alpaca_iex",
+        "data_status": "live",
+        "close": 752.81
+      },
+      "findings": {
+        "data_status": "live",
+        "source": "alpaca_iex",
+        "provider_realtime_class": "realtime_licensed",
+        "quality": "OK",
+        "stats": {
+          "rows": 97016,
+          "first": "2021-11-08 09:30:00-05:00",
+          "last": "2026-10-30 15:25:00-04:00",
+          "missing_recent": 0,
+          "last_bar_age_sec": 34.573967
+        },
+        "breaker": "closed",
+        "cost_violations": [],
+        "kill_switch": false,
+        "options_data": "UNAVAILABLE (no free executable quotes)"
+      },
+      "evidence": [
+        {
+          "claim": "bar completeness and freshness checked against the NYSE calendar",
+          "source": "quality.check_bars"
+        }
+      ],
+      "confidence": "n/a",
+      "contradictory_evidence": [],
+      "recommendation": "OK",
+      "invalidation_conditions": [],
+      "missing_data": [
+        "executable SPY option quotes"
+      ],
+      "risk_concerns": [],
+      "strategy_version": null,
+      "error": null,
+      "duration_ms": 0
+    },
+    "market_regime_analyst": {
+      "agent": "market_regime_analyst",
+      "agent_version": "1.0",
+      "timestamp": "2026-10-30 15:30:34.573967-04:00",
+      "input_snapshot": {
+        "last_bar_start": "2026-10-30 15:25:00-04:00",
+        "bars": 97016,
+        "source": "alpaca_iex",
+        "data_status": "live",
+        "close": 752.81
+      },
+      "findings": {
+        "classification": "bearish",
+        "bar_regime": "trend",
+        "structure_1h": "lower highs and lower lows",
+        "adx_5m": 42.2,
+        "adx_1h": 32.1,
+        "volatility": "expanding",
+        "levels": {
+          "prior_day_high": 770.75,
+          "prior_day_low": 766.62,
+          "prior_day_close": 769.49,
+          "opening_range_high": 761.43,
+          "opening_range_low": 759.48,
+          "vwap": 755.97,
+          "hourly_ema20": 762.82,
+          "swing_high_78": 769.59,
+          "swing_low_78": 750.38
+        },
+        "nearest_resistance": 755.97,
+        "nearest_support": 750.38,
+        "suitable_strategies": [
+          "trend_pullback",
+          "orb_retest",
+          "vol_expansion"
+        ],
+        "minutes_to_close": 29
+      },
+      "evidence": [
+        {
+          "claim": "1h trend direction -1, structure: lower highs and lower lows",
+          "source": "features.make_hourly (completed hours only)"
+        }
+      ],
+      "confidence": "moderate",
+      "contradictory_evidence": [],
+      "recommendation": "SHORT",
+      "invalidation_conditions": [
+        "1h close above its 20-EMA (762.82)"
+      ],
+      "missing_data": [],
+      "risk_concerns": [],
+      "strategy_version": null,
+      "error": null,
+      "duration_ms": 1
+    },
+    "volatility_event_analyst": {
+      "agent": "volatility_event_analyst",
+      "agent_version": "1.0",
+      "timestamp": "2026-10-30 15:30:34.573967-04:00",
+      "input_snapshot": {
+        "last_bar_start": "2026-10-30 15:25:00-04:00",
+        "bars": 97016,
+        "source": "alpaca_iex",
+        "data_status": "live",
+        "close": 752.81
+      },
+      "findings": {
+        "realized_vol_annualised": 0.218,
+        "vol_regime": "expanding",
+        "vix": {
+          "level": 21.8,
+          "vs_prior_close_pct": 32.5,
+          "last_hour_pct": -1.4,
+          "source": "Yahoo ^VIX, unofficial",
+          "as_of": "2026-10-30 15:00:00-04:00"
+        },
+        "event_blackout": null,
+        "option_spread_widening": "not measurable without option quotes"
+      },
+      "evidence": [
+        {
+          "claim": "event list is user-maintained, not live",
+          "source": "config/events.yaml"
+        }
+      ],
+      "confidence": "n/a",
+      "contradictory_evidence": [],
+      "recommendation": "OK",
+      "invalidation_conditions": [],
+      "missing_data": [
+        "option spread/IV data"
+      ],
+      "risk_concerns": [],
+      "strategy_version": null,
+      "error": null,
+      "duration_ms": 0
+    },
+    "five_minute_entry_analyst": {
+      "agent": "five_minute_entry_analyst",
+      "agent_version": "1.0",
+      "timestamp": "2026-10-30 15:30:34.573967-04:00",
+      "input_snapshot": {
+        "last_bar_start": "2026-10-30 15:25:00-04:00",
+        "bars": 97016,
+        "source": "alpaca_iex",
+        "data_status": "live",
+        "close": 752.81
+      },
+      "findings": {
+        "candidates": [],
+        "setups_forming": [
+          {
+            "strategy": "trend_pullback",
+            "text": "1h trend down; price within 0.5 ATR of EMA21, waiting for a reclaim of the prior bar extreme"
+          },
+          {
+            "strategy": "orb_retest",
+            "text": "Price is below the opening range low; waiting for a retest that holds"
+          }
+        ],
+        "last_bar_close_time": "2026-10-30 15:30:00-04:00",
+        "price_vs_vwap": -3.157,
+        "atr_5m": 0.891,
+        "rsi": 46.2
+      },
+      "evidence": [],
+      "confidence": "n/a",
+      "contradictory_evidence": [],
+      "recommendation": "NO_TRADE",
+      "invalidation_conditions": [],
+      "missing_data": [],
+      "risk_concerns": [],
+      "strategy_version": null,
+      "error": null,
+      "duration_ms": 210
+    },
+    "technical_indicator_researcher": {
+      "agent": "technical_indicator_researcher",
+      "agent_version": "1.0",
+      "timestamp": "2026-10-30 15:30:34.573967-04:00",
+      "input_snapshot": {
+        "last_bar_start": "2026-10-30 15:25:00-04:00",
+        "bars": 97016,
+        "source": "alpaca_iex",
+        "data_status": "live",
+        "close": 752.81
+      },
+      "findings": {
+        "latest_values": {
+          "ema9": 752.537,
+          "ema21": 752.934,
+          "rsi": 46.244,
+          "atr": 0.891,
+          "adx": 42.199,
+          "vwap": 755.967,
+          "macd_hist": 0.32,
+          "bb_up": 754.377,
+          "bb_lo": 750.482,
+          "rvol": 3.917,
+          "rv": 0.218
+        },
+        "ablation_train_val_only": {
+          "trend_pullback": {
+            "with_default_filters": {
+              "trades": 1206,
+              "net_expectancy_R": 0.035
+            },
+            "drop_htf": {
+              "trades": 1965,
+              "net_expectancy_R": -0.002
+            },
+            "drop_vwap": {
+              "trades": 1294,
+              "net_expectancy_R": 0.012
+            },
+            "drop_adx": {
+              "trades": 1759,
+              "net_expectancy_R": 0.004
+            },
+            "add_rvol": {
+              "trades": 833,
+              "net_expectancy_R": 0.038
+            }
+          },
+          "orb_retest": {
+            "with_default_filters": {
+              "trades": 901,
+              "net_expectancy_R": 0.023
+            },
+            "add_htf": {
+              "trades": 465,
+              "net_expectancy_R": 0.019
+            },
+            "drop_vwap": {
+              "trades": 927,
+              "net_expectancy_R": 0.02
+            },
+            "add_adx": {
+              "trades": 622,
+              "net_expectancy_R": 0.008
+            },
+            "add_rvol": {
+              "trades": 380,
+              "net_expectancy_R": 0.006
+            }
+          },
+          "failed_breakout": {
+            "with_default_filters": {
+              "trades": 831,
+              "net_expectancy_R": -0.051
+            },
+            "add_htf": {
+              "trades": 391,
+              "net_expectancy_R": -0.05
+            },
+            "add_vwap": {
+              "trades": 277,
+              "net_expectancy_R": -0.045
+            },
+            "add_adx": {
+              "trades": 557,
+              "net_expectancy_R": -0.033
+            },
+            "add_rvol": {
+              "trades": 373,
+              "net_expectancy_R": -0.088
+            }
+          },
+          "range_reversion": {
+            "with_default_filters": {
+              "trades": 132,
+              "net_expectancy_R": -0.167
+            },
+            "add_htf": {
+              "trades": 41,
+              "net_expectancy_R": -0.146
+            },
+            "add_vwap": {
+              "trades": 6,
+              "net_expectancy_R": 0.313
+            },
+            "add_adx": {
+              "trades": 0,
+              "net_expectancy_R": null
+            },
+            "add_rvol": {
+              "trades": 66,
+              "net_expectancy_R": -0.139
+            }
+          },
+          "vol_expansion": {
+            "with_default_filters": {
+              "trades": 430,
+              "net_expectancy_R": 0.014
+            },
+            "add_htf": {
+              "trades": 170,
+              "net_expectancy_R": 0.013
+            },
+            "add_vwap": {
+              "trades": 412,
+              "net_expectancy_R": 0.007
+            },
+            "add_adx": {
+              "trades": 302,
+              "net_expectancy_R": 0.048
+            },
+            "drop_rvol": {
+              "trades": 579,
+              "net_expectancy_R": 0.041
+            }
+          },
+          "orb_breakout": {
+            "with_default_filters": {
+              "trades": 540,
+              "net_expectancy_R": 0.024
+            },
+            "drop_htf": {
+              "trades": 1206,
+              "net_expectancy_R": -0.01
+            },
+            "drop_vwap": {
+              "trades": 540,
+              "net_expectancy_R": 0.024
+            },
+            "add_adx": {
+              "trades": 386,
+              "net_expectancy_R": 0.059
+            },
+            "add_rvol": {
+              "trades": 285,
+              "net_expectancy_R": 0.022
+            }
+          },
+          "vwap_reclaim": {
+            "with_default_filters": {
+              "trades": 595,
+              "net_expectancy_R": -0.15
+            },
+            "drop_htf": {
+              "trades": 1164,
+              "net_expectancy_R": -0.132
+            },
+            "add_vwap": {
+              "trades": 595,
+              "net_expectancy_R": -0.15
+            },
+            "add_adx": {
+              "trades": 398,
+              "net_expectancy_R": -0.145
+            },
+            "add_rvol": {
+              "trades": 251,
+              "net_expectancy_R": -0.085
+            }
+          },
+          "gap_fade": {
+            "with_default_filters": {
+              "trades": 486,
+              "net_expectancy_R": -0.092
+            },
+            "add_htf": {
+              "trades": 150,
+              "net_expectancy_R": 0.037
+            },
+            "add_vwap": {
+              "trades": 332,
+              "net_expectancy_R": -0.073
+            },
+            "add_adx": {
+              "trades": 431,
+              "net_expectancy_R": -0.081
+            },
+            "add_rvol": {
+              "trades": 246,
+              "net_expectancy_R": -0.091
+            }
+          },
+          "prior_day_break": {
+            "with_default_filters": {
+              "trades": 234,
+              "net_expectancy_R": 0.084
+            },
+            "drop_htf": {
+              "trades": 397,
+              "net_expectancy_R": 0.04
+            },
+            "drop_vwap": {
+              "trades": 234,
+              "net_expectancy_R": 0.084
+            },
+            "add_adx": {
+              "trades": 163,
+              "net_expectancy_R": 0.064
+            },
+            "add_rvol": {
+              "trades": 131,
+              "net_expectancy_R": 0.004
+            }
+          },
+          "support_bounce": {
+            "with_default_filters": {
+              "trades": 414,
+              "net_expectancy_R": 0.023
+            },
+            "drop_htf": {
+              "trades": 688,
+              "net_expectancy_R": -0.036
+            },
+            "add_vwap": {
+              "trades": 255,
+              "net_expectancy_R": 0.092
+            },
+            "add_adx": {
+              "trades": 255,
+              "net_expectancy_R": 0.003
+            },
+            "add_rvol": {
+              "trades": 166,
+              "net_expectancy_R": -0.046
+            }
+          },
+          "swing_breakout": {
+            "with_default_filters": {
+              "trades": 364,
+              "net_expectancy_R": -0.01
+            },
+            "drop_htf": {
+              "trades": 659,
+              "net_expectancy_R": -0.022
+            },
+            "drop_vwap": {
+              "trades": 373,
+              "net_expectancy_R": -0.01
+            },
+            "add_adx": {
+              "trades": 239,
+              "net_expectancy_R": -0.038
+            },
+            "add_rvol": {
+              "trades": 364,
+              "net_expectancy_R": -0.01
+            }
+          },
+          "steady_scalper": {
+            "with_default_filters": {
+              "trades": 1393,
+              "net_expectancy_R": -0.006
+            },
+            "drop_htf": {
+              "trades": 2144,
+              "net_expectancy_R": -0.029
+            },
+            "drop_vwap": {
+              "trades": 1488,
+              "net_expectancy_R": -0.005
+            },
+            "drop_adx": {
+              "trades": 1976,
+              "net_expectancy_R": -0.027
+            },
+            "add_rvol": {
+              "trades": 924,
+              "net_expectancy_R": 0.002
+            }
+          },
+          "zone_rejection": {}
+        },
+        "note": "No indicator or filter has demonstrated repeatable out-of-sample value yet; treat all as candidates."
+      },
+      "evidence": [
+        {
+          "claim": "ablation compares each filter on/off over the same train+validation dates with costs",
+          "source": "backtest.run_research"
+        }
+      ],
+      "confidence": "n/a",
+      "contradictory_evidence": [],
+      "recommendation": "INFO",
+      "invalidation_conditions": [],
+      "missing_data": [],
+      "risk_concerns": [
+        "indicators overlap (EMA, VWAP, MACD, ADX all measure trend)"
+      ],
+      "strategy_version": null,
+      "error": null,
+      "duration_ms": 0
+    },
+    "strategy_development_agent": {
+      "agent": "strategy_development_agent",
+      "agent_version": "1.0",
+      "timestamp": "2026-10-30 15:30:34.573967-04:00",
+      "input_snapshot": {
+        "last_bar_start": "2026-10-30 15:25:00-04:00",
+        "bars": 97016,
+        "source": "alpaca_iex",
+        "data_status": "live",
+        "close": 752.81
+      },
+      "findings": {
+        "registry": {
+          "trend_pullback": {
+            "version": "1.0",
+            "label": "trend_pullback@1.0#6551a6ed",
+            "hypothesis": "When the 1-hour trend and 5-minute trend agree, a shallow pullback to the 21-EMA that reclaims its prior bar high tends to continue in the trend direction.",
+            "verdict": "NOT_DEMONSTRATED"
+          },
+          "orb_retest": {
+            "version": "1.0",
+            "label": "orb_retest@1.0#fa99858c",
+            "hypothesis": "A confirmed break of the first-30-minute range that retests the break level and holds tends to extend.",
+            "verdict": "NOT_DEMONSTRATED"
+          },
+          "failed_breakout": {
+            "version": "1.0",
+            "label": "failed_breakout@1.0#95a5a945",
+            "hypothesis": "A break of the opening range that fails and closes back inside traps late entrants and tends to reverse.",
+            "verdict": "NOT_DEMONSTRATED"
+          },
+          "range_reversion": {
+            "version": "1.0",
+            "label": "range_reversion@1.0#14e675a3",
+            "hypothesis": "In low-trend (range) conditions, a close back inside a Bollinger band after an excursion tends to revert toward the mean.",
+            "verdict": "INSUFFICIENT_SAMPLE"
+          },
+          "vol_expansion": {
+            "version": "1.0",
+            "label": "vol_expansion@1.0#750b320a",
+            "hypothesis": "A bar with abnormally large range that closes near its extreme and breaks the 20-bar high/low signals momentum that continues.",
+            "verdict": "NOT_DEMONSTRATED"
+          },
+          "orb_breakout": {
+            "version": "1.0",
+            "label": "orb_breakout@1.0#3726d10e",
+            "hypothesis": "A decisive close beyond the first-30-minute range, in the direction of the 1-hour trend, tends to extend (the published 'opening range breakout' idea; effects can fade, so it must pass the same fair test).",
+            "verdict": "NOT_DEMONSTRATED"
+          },
+          "vwap_reclaim": {
+            "version": "1.0",
+            "label": "vwap_reclaim@1.0#151da59f",
+            "hypothesis": "In a 1-hour trend, a dip through VWAP that is reclaimed on the next close tends to resume the trend.",
+            "verdict": "NOT_DEMONSTRATED"
+          },
+          "gap_fade": {
+            "version": "1.0",
+            "label": "gap_fade@1.0#14e675a3",
+            "hypothesis": "After a gap of at least 0.2% from the prior close, price often drifts back toward the prior close once it starts turning that way.",
+            "verdict": "NOT_DEMONSTRATED"
+          },
+          "prior_day_break": {
+            "version": "1.0",
+            "label": "prior_day_break@1.0#3726d10e",
+            "hypothesis": "A first close beyond yesterday's high (low), with the 1-hour trend behind it, tends to continue.",
+            "verdict": "INSUFFICIENT_SAMPLE"
+          },
+          "support_bounce": {
+            "version": "1.0",
+            "label": "support_bounce@1.0#151da59f",
+            "hypothesis": "In an uptrend (higher highs and higher lows) a dip back to the last higher low that is rejected tends to resume up; mirrored for resistance in a downtrend.",
+            "verdict": "NOT_DEMONSTRATED"
+          },
+          "swing_breakout": {
+            "version": "1.0",
+            "label": "swing_breakout@1.0#3726d10e",
+            "hypothesis": "A strong close beyond the last confirmed swing high (low) on above-normal volume tends to continue.",
+            "verdict": "NOT_DEMONSTRATED"
+          },
+          "steady_scalper": {
+            "version": "1.0",
+            "label": "steady_scalper@1.0#69a10f44",
+            "hypothesis": "Same pullback entries as trend_pullback with a wide stop and a near target, to test what a high win rate costs.",
+            "verdict": "NOT_DEMONSTRATED"
+          },
+          "zone_rejection": {
+            "version": "1.0",
+            "label": "zone_rejection@1.0#151da59f",
+            "hypothesis": "A candle that probes a strong support (or resistance) zone and is rejected, while the bigger trend agrees and there is room to run, tends to reverse away from it.",
+            "verdict": "INSUFFICIENT_SAMPLE"
+          }
+        },
+        "proposals_not_applied": [
+          "range_reversion: keep forward paper testing to accumulate trades; do not change parameters meanwhile.",
+          "prior_day_break: keep forward paper testing to accumulate trades; do not change parameters meanwhile.",
+          "zone_rejection: keep forward paper testing to accumulate trades; do not change parameters meanwhile."
+        ],
+        "policy": "Proposals never change live rules automatically. New versions need backtest, out-of-sample test and approval."
+      },
+      "evidence": [
+        {
+          "claim": "strategy specs are versioned and parameter-hashed",
+          "source": "strategies.py"
+        }
+      ],
+      "confidence": "n/a",
+      "contradictory_evidence": [],
+      "recommendation": "INFO",
+      "invalidation_conditions": [],
+      "missing_data": [],
+      "risk_concerns": [],
+      "strategy_version": null,
+      "error": null,
+      "duration_ms": 0
+    },
+    "quantitative_backtesting_agent": {
+      "agent": "quantitative_backtesting_agent",
+      "agent_version": "1.0",
+      "timestamp": "2026-10-30 15:30:34.573967-04:00",
+      "input_snapshot": {
+        "last_bar_start": "2026-10-30 15:25:00-04:00",
+        "bars": 97016,
+        "source": "alpaca_iex",
+        "data_status": "live",
+        "close": 752.81
+      },
+      "findings": {
+        "evidence_status": "NOT_APPLICABLE",
+        "options_research": "UNAVAILABLE"
+      },
+      "evidence": [],
+      "confidence": "n/a",
+      "contradictory_evidence": [],
+      "recommendation": "INFO",
+      "invalidation_conditions": [],
+      "missing_data": [],
+      "risk_concerns": [],
+      "strategy_version": null,
+      "error": null,
+      "duration_ms": 0
+    },
+    "options_contract_analyst": {
+      "agent": "options_contract_analyst",
+      "agent_version": "1.0",
+      "timestamp": "2026-10-30 15:30:34.573967-04:00",
+      "input_snapshot": {
+        "last_bar_start": "2026-10-30 15:25:00-04:00",
+        "bars": 97016,
+        "source": "alpaca_iex",
+        "data_status": "live",
+        "close": 752.81
+      },
+      "findings": {
+        "status": "NOT_EVALUATED",
+        "reason": "no entry candidate"
+      },
+      "evidence": [],
+      "confidence": "n/a",
+      "contradictory_evidence": [],
+      "recommendation": "NO_CONTRACT",
+      "invalidation_conditions": [],
+      "missing_data": [],
+      "risk_concerns": [],
+      "strategy_version": null,
+      "error": null,
+      "duration_ms": 0
+    },
+    "adversarial_strategy_reviewer": {
+      "agent": "adversarial_strategy_reviewer",
+      "agent_version": "1.0",
+      "timestamp": "2026-10-30 15:30:34.573967-04:00",
+      "input_snapshot": {
+        "last_bar_start": "2026-10-30 15:25:00-04:00",
+        "bars": 97016,
+        "source": "alpaca_iex",
+        "data_status": "live",
+        "close": 752.81
+      },
+      "findings": {
+        "vetoes": [],
+        "warnings": []
+      },
+      "evidence": [],
+      "confidence": "n/a",
+      "contradictory_evidence": [],
+      "recommendation": "NO_OBJECTION",
+      "invalidation_conditions": [],
+      "missing_data": [],
+      "risk_concerns": [],
+      "strategy_version": null,
+      "error": null,
+      "duration_ms": 0
+    },
+    "independent_risk_manager": {
+      "agent": "independent_risk_manager",
+      "agent_version": "1.0",
+      "timestamp": "2026-10-30 15:30:34.573967-04:00",
+      "input_snapshot": {
+        "last_bar_start": "2026-10-30 15:25:00-04:00",
+        "bars": 97016,
+        "source": "alpaca_iex",
+        "data_status": "live",
+        "close": 752.81
+      },
+      "findings": {
+        "approved": false,
+        "reason": "no candidate"
+      },
+      "evidence": [],
+      "confidence": "n/a",
+      "contradictory_evidence": [],
+      "recommendation": "NOT_EVALUATED",
+      "invalidation_conditions": [],
+      "missing_data": [],
+      "risk_concerns": [],
+      "strategy_version": null,
+      "error": null,
+      "duration_ms": 0
+    },
+    "performance_adaptation_analyst": {
+      "agent": "performance_adaptation_analyst",
+      "agent_version": "1.0",
+      "timestamp": "2026-10-30 15:30:34.573967-04:00",
+      "input_snapshot": {
+        "last_bar_start": "2026-10-30 15:25:00-04:00",
+        "bars": 97016,
+        "source": "alpaca_iex",
+        "data_status": "live",
+        "close": 752.81
+      },
+      "findings": {
+        "paper_overall": {
+          "trades": 7,
+          "win_rate": 0.571,
+          "avg_win_R": 1.657,
+          "avg_loss_R": -1.021,
+          "gross_expectancy_R": 0.542,
+          "net_expectancy_R": 0.509,
+          "total_net_R": 3.57,
+          "profit_factor": 2.16,
+          "max_drawdown_R": 2.03,
+          "longest_losing_streak": 2,
+          "t_stat": 0.89,
+          "ci_level": 0.95,
+          "ci_low": -0.519,
+          "ci_high": 1.568
+        },
+        "scope": "SIMULATED SPY share trades, not option fills",
+        "by_regime": {
+          "range": 2.25,
+          "trend": 0.219
+        },
+        "by_hour": {
+          "10": 2.25,
+          "11": -1.014,
+          "12": 0.617,
+          "13": 0.366
+        },
+        "by_strategy": {
+          "failed_breakout": {
+            "trades": 1,
+            "net_expectancy_R": 2.25
+          },
+          "trend_pullback": {
+            "trades": 5,
+            "net_expectancy_R": 0.115
+          },
+          "vol_expansion": {
+            "trades": 1,
+            "net_expectancy_R": 0.741
+          }
+        },
+        "backtest_vs_forward": [],
+        "slippage_vs_assumption": "not measurable: paper fills are simulated"
+      },
+      "evidence": [],
+      "confidence": "n/a",
+      "contradictory_evidence": [],
+      "recommendation": "INFO",
+      "invalidation_conditions": [],
+      "missing_data": [],
+      "risk_concerns": [
+        "Any rule change must be a new strategy version, backtested, validated out of sample, and approved.",
+        "Fewer than 30 closed trades: statistics are too thin to act on."
+      ],
+      "strategy_version": null,
+      "error": null,
+      "duration_ms": 5
+    }
+  },
+  "last_bar": "2026-10-30 15:25:00-04:00"
+}
